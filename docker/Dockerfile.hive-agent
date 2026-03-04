@@ -1,0 +1,63 @@
+# Build stage
+FROM rust:1.75-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace
+COPY Cargo.toml Cargo.lock ./
+COPY crates/hive-core ./crates/hive-core/
+COPY crates/hive-agent ./crates/hive-agent/
+
+# Build
+RUN cargo build --release -p hive-agent
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+# Install base tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    findutils \
+    grep \
+    sed \
+    awk \
+    jq \
+    fzf \
+    httpie \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g pnpm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install Kilo
+RUN npm install -g @kilocode/cli
+
+# Install Claude Code
+RUN curl -fsSL https://claude.ai/install.sh | sh
+
+# Copy agent binary
+COPY --from=builder /build/target/release/hive-agent /usr/local/bin/
+
+# Create user (non-root for safety)
+RUN useradd -m -u 1000 agent
+USER agent
+
+WORKDIR /app
+
+CMD ["hive-agent"]

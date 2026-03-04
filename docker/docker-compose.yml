@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  hive-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.hive-server
+    container_name: hive-server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../.hive:/data
+    networks:
+      - hive-net
+    environment:
+      - RUST_LOG=info
+      - HIVE_SERVER_PORT=8080
+      - HIVE_DB_PATH=/data/hive.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app-container:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.app-container
+    container_name: app-container
+    ports:
+      - "3000:3000"
+      - "8081:8081"
+    volumes:
+      - ..:/app:Delegated
+      - ../.hive:/app/.hive:ro
+    networks:
+      - hive-net
+    environment:
+      - HIVE_APP_DAEMON_PORT=8081
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hive-agent-0:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.hive-agent
+    container_name: hive-agent-0
+    volumes:
+      - ..:/app:Delegated
+      - ../.hive:/app/.hive:ro
+    networks:
+      - hive-net
+    environment:
+      - HIVE_AGENT_ID=agent-0
+      - HIVE_SERVER_URL=ws://hive-server:8080
+      - HIVE_APP_DAEMON_URL=http://app-container:8081
+      - CODING_AGENT=kilo
+      - AGENT_TAGS=backend
+      - RUST_LOG=info
+    depends_on:
+      - hive-server
+      - app-container
+
+networks:
+  hive-net:
+    driver: bridge

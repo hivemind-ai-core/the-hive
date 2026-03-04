@@ -1,0 +1,29 @@
+[package]
+name = "hive-agent"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["The Hive Team"]
+rust-version = "1.93"
+
+[[bin]]
+name = "hive-agent"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+chrono = { version = "0.4.44", features = ["serde"] }
+futures-util = "0.3.32"
+hive-core = { version = "0.1.0", path = "../hive-core" }
+reqwest = { version = "0.13.2", features = ["json"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+tokio = { version = "1.50.0", features = ["full"] }
+tokio-tungstenite = "0.28.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+uuid = { version = "1.21.0", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio-test = "0.4.5"

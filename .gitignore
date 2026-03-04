@@ -1,0 +1,32 @@
+# Build artifacts
+/target/
+**/target/
+
+# Cargo lock - optional, but we track it
+# Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files (local secrets)
+.env
+.env.local
+
+# Hive-specific
+.hive/
+*.db
+*.db-journal
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp

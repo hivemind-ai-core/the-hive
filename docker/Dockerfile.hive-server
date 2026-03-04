@@ -1,0 +1,38 @@
+# Build stage
+FROM rust:1.75-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace
+COPY Cargo.toml Cargo.lock ./
+COPY crates/hive-core ./crates/hive-core/
+COPY crates/hive-server ./crates/hive-server/
+
+# Build
+RUN cargo build --release -p hive-server
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/hive-server /usr/local/bin/
+
+RUN useradd -m -u 1000 hive
+USER hive
+WORKDIR /data
+
+ENV RUST_LOG=info
+ENV HIVE_SERVER_PORT=8080
+ENV HIVE_DB_PATH=/data/hive.db
+
+CMD ["hive-server"]

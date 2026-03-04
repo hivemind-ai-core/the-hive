@@ -1,0 +1,27 @@
+[package]
+name = "hive-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["The Hive Team"]
+rust-version = "1.93"
+
+[[bin]]
+name = "hive"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+bollard = "0.20.1"
+clap = { version = "4.5.60", features = ["derive", "env"] }
+crossterm = "0.29.0"
+dirs = "6.0.0"
+hive-core = { version = "0.1.0", path = "../hive-core" }
+ratatui = "0.30.0"
+tokio = { version = "1.50.0", features = ["full"] }
+toml = "1.0.3"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio-test = "0.4.5"
