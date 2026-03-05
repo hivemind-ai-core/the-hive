@@ -93,7 +93,12 @@ pub fn run(project_dir: &Path) -> Result<()> {
         println!("Copied {name} → .hive/bin/{name}");
     }
 
-    // Update .gitignore to exclude hive.db and .hive/bin/.
+    // Create .hive/agents/ so it exists before agent containers start writing session files.
+    let agents_dir = hive.join("agents");
+    std::fs::create_dir_all(&agents_dir)
+        .with_context(|| format!("creating {}", agents_dir.display()))?;
+
+    // Update .gitignore to exclude hive.db, .hive/bin/, etc.
     update_gitignore(project_dir)?;
 
     println!("\nRun 'hive start' to build images and launch the hive.");
@@ -139,7 +144,7 @@ fn generate_project_id(project_dir: &Path) -> String {
 
 fn update_gitignore(project_dir: &Path) -> Result<()> {
     let gitignore = project_dir.join(".gitignore");
-    let entries = [".hive/hive.db", ".hive/bin/", ".hive/.env"];
+    let entries = [".hive/hive.db", ".hive/bin/", ".hive/.env", ".hive/claude.json", ".hive/agents/", ".hive/kilocode/"];
 
     let existing = if gitignore.exists() {
         std::fs::read_to_string(&gitignore).context("reading .gitignore")?

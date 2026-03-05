@@ -13,7 +13,14 @@ use crate::config::io::{hive_dir, default_path};
 use crate::docker::{containers, lifecycle, network};
 
 fn connect_docker() -> Result<Docker> {
-    Docker::connect_with_local_defaults().context("connecting to Docker")
+    let gcfg = config::load_global();
+    if let Some(socket) = gcfg.docker.socket.as_deref() {
+        // Use socket URI from global config.
+        Docker::connect_with_socket(socket, 120, bollard::API_DEFAULT_VERSION)
+            .context("connecting to Docker via global config socket")
+    } else {
+        Docker::connect_with_local_defaults().context("connecting to Docker")
+    }
 }
 
 fn load_config(project_dir: &Path) -> Result<Config> {
@@ -73,8 +80,8 @@ pub async fn start(project_dir: &Path) -> Result<()> {
     let docker = connect_docker()?;
     let id = &cfg.project_id;
 
-    // Ensure network exists.
-    network::ensure(&docker, id).await?;
+    // Ensure network exists (internal = no internet for agents if isolation enabled).
+    network::ensure(&docker, id, cfg.network.isolate).await?;
 
     // Build any missing images.
     ensure_images(&docker, &cfg, project_dir).await?;
@@ -236,6 +243,194 @@ pub async fn status(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Write or update a single `KEY=VALUE` entry in `.hive/.env`.
+fn dotenv_set(path: &std::path::Path, key: &str, value: &str) -> Result<()> {
+    let existing = if path.exists() {
+        std::fs::read_to_string(path).context("reading .hive/.env")?
+    } else {
+        String::new()
+    };
+
+    let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
+    let prefix = format!("{key}=");
+    let new_line = format!("{key}={value}");
+
+    if let Some(pos) = lines.iter().position(|l| l.starts_with(&prefix)) {
+        lines[pos] = new_line;
+    } else {
+        lines.push(new_line);
+    }
+
+    // Ensure trailing newline.
+    let mut content = lines.join("\n");
+    content.push('\n');
+
+    std::fs::write(path, &content).context("writing .hive/.env")?;
+    Ok(())
+}
+
+/// `hive auth set-key KEY VALUE` — write an API key to `.hive/.env`.
+pub fn auth_set_key(project_dir: &Path, key: &str, value: &str) -> Result<()> {
+    anyhow::ensure!(!key.is_empty(), "key must not be empty");
+    anyhow::ensure!(!value.is_empty(), "value must not be empty");
+
+    let env_path = hive_dir(project_dir).join(".env");
+    dotenv_set(&env_path, key, value)?;
+
+    let masked = if value.len() > 8 { format!("{}***", &value[..8]) } else { "***".to_string() };
+    println!("Set {key}={masked} in .hive/.env");
+    println!("Run 'hive restart' to apply to running containers.");
+    Ok(())
+}
+
+/// `hive auth set-endpoint KEY URL` — write a base URL to `.hive/.env`.
+pub fn auth_set_endpoint(project_dir: &Path, key: &str, url: &str) -> Result<()> {
+    anyhow::ensure!(!key.is_empty(), "key must not be empty");
+    anyhow::ensure!(!url.is_empty(), "url must not be empty");
+
+    let env_path = hive_dir(project_dir).join(".env");
+    dotenv_set(&env_path, key, url)?;
+
+    println!("Set {key}={url} in .hive/.env");
+    println!("Run 'hive restart' to apply to running containers.");
+    Ok(())
+}
+
+/// `hive auth list` — list all keys/endpoints in `.hive/.env` with masked values.
+pub fn auth_list(project_dir: &Path) -> Result<()> {
+    let env_path = hive_dir(project_dir).join(".env");
+
+    if !env_path.exists() {
+        println!(".hive/.env not found. Use 'hive auth set-key' to add credentials.");
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&env_path).context("reading .hive/.env")?;
+    let entries: Vec<_> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
+        .collect();
+
+    if entries.is_empty() {
+        println!(".hive/.env is empty.");
+        return Ok(());
+    }
+
+    println!("Contents of .hive/.env:");
+    for line in entries {
+        if let Some((k, v)) = line.split_once('=') {
+            // Show URLs in full; mask key-like values.
+            let display = if v.starts_with("http://") || v.starts_with("https://") {
+                v.to_string()
+            } else if v.len() > 8 {
+                format!("{}***", &v[..8])
+            } else {
+                "***".to_string()
+            };
+            println!("  {k}={display}");
+        }
+    }
+    Ok(())
+}
+
+/// `hive auth status` — show what auth credentials are detected for each agent.
+pub fn auth_status(project_dir: &Path) -> Result<()> {
+    let cfg = load_config(project_dir)?;
+    let hive = hive_dir(project_dir);
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root"));
+
+    // Read .hive/.env keys (show masked values).
+    let dotenv_path = hive.join(".env");
+    let dotenv_keys: Vec<String> = if dotenv_path.exists() {
+        std::fs::read_to_string(&dotenv_path)
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
+            .filter_map(|l| {
+                let (k, v) = l.split_once('=')?;
+                let k = k.trim();
+                let v = v.trim();
+                let masked = if v.len() > 8 {
+                    format!("{}***", &v[..8])
+                } else {
+                    "***".to_string()
+                };
+                Some(format!("  {k}={masked}"))
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
+    let claude_json_host = home.join(".claude.json");
+    let claude_json_hive = hive.join("claude.json");
+    let claude_dir_host = home.join(".claude");
+    let kilocode_dir_host = home.join(".kilocode");
+
+    println!("Auth status for {}", hive.display());
+    println!();
+
+    // .hive/.env keys
+    if dotenv_keys.is_empty() {
+        println!("  .hive/.env         — not found (no API keys configured)");
+    } else {
+        println!("  .hive/.env         — found:");
+        for line in &dotenv_keys {
+            println!("{line}");
+        }
+    }
+    println!();
+
+    // Per-agent summary
+    for agent in &cfg.agents {
+        println!("Agent '{}' ({})", agent.name, agent.coding_agent);
+        match agent.coding_agent.as_str() {
+            "claude" => {
+                let host_ok  = check("~/.claude.json (host login)", claude_json_host.exists());
+                let hive_ok  = check(".hive/claude.json (synced creds)", claude_json_hive.exists());
+                let dir_ok   = check("~/.claude/ (settings dir)", claude_dir_host.exists());
+                let key_ok   = dotenv_keys.iter().any(|l| l.contains("ANTHROPIC_API_KEY"));
+                let _key_msg = check(".hive/.env ANTHROPIC_API_KEY", key_ok);
+
+                if !host_ok && !hive_ok && !key_ok {
+                    println!("  ⚠  No claude credentials found. Options:");
+                    println!("       API key:      hive auth set-key ANTHROPIC_API_KEY sk-ant-...");
+                    println!("       Subscription: hive auth sync  (copies ~/.claude.json)");
+                    println!("                  or hive auth login (login inside container)");
+                }
+                let _ = dir_ok;
+            }
+            "kilo" => {
+                let dir_ok  = check("~/.kilocode/ (kilo settings)", kilocode_dir_host.exists());
+                let key_ok  = dotenv_keys.iter().any(|l| {
+                    l.contains("ANTHROPIC_API_KEY") || l.contains("OPENAI_API_KEY")
+                        || l.contains("GOOGLE_API_KEY")
+                });
+                let _key_msg = check(".hive/.env API key (ANTHROPIC/OPENAI/GOOGLE)", key_ok);
+
+                if !key_ok {
+                    println!("  ⚠  No API key found for kilo. Set one with:");
+                    println!("       hive auth set-key ANTHROPIC_API_KEY sk-ant-...");
+                    println!("       hive auth set-key OPENAI_API_KEY sk-...");
+                }
+                let _ = dir_ok;
+            }
+            other => {
+                println!("  (unknown agent type '{other}')");
+            }
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+fn check(label: &str, present: bool) -> bool {
+    let icon = if present { "✓" } else { "✗" };
+    println!("  {icon}  {label}");
+    present
+}
+
 /// `hive auth sync` — copy ~/.claude.json to .hive/claude.json for use in agent containers.
 pub fn auth_sync(project_dir: &Path) -> Result<()> {
     let src = dirs::home_dir()
@@ -252,7 +447,51 @@ pub fn auth_sync(project_dir: &Path) -> Result<()> {
     let dst = hive_dir(project_dir).join("claude.json");
     std::fs::copy(&src, &dst).context("copying ~/.claude.json to .hive/claude.json")?;
     println!("Copied ~/.claude.json → .hive/claude.json");
-    println!("Run 'hive restart' to mount the credentials into running agent containers.");
+    println!("The credentials will be auto-mounted as /home/agent/.claude.json in claude agent containers.");
+    println!("Run 'hive restart' to apply to running containers.");
+    Ok(())
+}
+
+/// `hive auth kilo-sync` — copy ~/.kilocode/ to .hive/kilocode/ for project-local kilo config.
+///
+/// Once synced, the project-local copy is mounted instead of the global one,
+/// allowing per-project kilo settings without affecting other projects.
+pub fn auth_kilo_sync(project_dir: &Path) -> Result<()> {
+    let src = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?
+        .join(".kilocode");
+
+    if !src.exists() {
+        anyhow::bail!(
+            "~/.kilocode not found.\n\
+             Install Kilo and run it at least once to create the config directory."
+        );
+    }
+
+    let dst = hive_dir(project_dir).join("kilocode");
+    if dst.exists() {
+        std::fs::remove_dir_all(&dst).context("removing existing .hive/kilocode/")?;
+    }
+    copy_dir_all(&src, &dst).context("copying ~/.kilocode to .hive/kilocode/")?;
+    println!("Copied ~/.kilocode → .hive/kilocode/");
+    println!("The directory will be auto-mounted as /home/agent/.kilocode in kilo agent containers.");
+    println!("Run 'hive restart' to apply to running containers.");
+    Ok(())
+}
+
+/// Recursively copy a directory.
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src).with_context(|| format!("reading {}", src.display()))? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dest = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), dest)?;
+        }
+    }
     Ok(())
 }
 
@@ -296,26 +535,84 @@ pub async fn auth_login(project_dir: &Path, email: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// `hive logs <container>` — stream logs from a container.
-pub async fn logs(project_dir: &Path, container: &str) -> Result<()> {
+/// `hive logs [container] [-f]` — stream logs from one or all containers.
+///
+/// `container` can be:
+/// - `"all"` (default): interleave logs from all project containers with `[name]` prefixes
+/// - `"server"` / `"app"` / agent name: resolve to the project-scoped container name
+/// - full container name: used as-is
+pub async fn logs(project_dir: &Path, container: &str, follow: bool) -> Result<()> {
     use bollard::query_parameters::LogsOptionsBuilder;
     use futures_util::StreamExt;
 
-    let _ = load_config(project_dir)?; // validate config exists
+    let cfg = load_config(project_dir)?;
     let docker = connect_docker()?;
+    let id = &cfg.project_id;
 
-    let opts = LogsOptionsBuilder::default()
-        .stdout(true)
-        .stderr(true)
-        .follow(false)
-        .tail("100")
-        .build();
+    // Build list of (alias, full_container_name) pairs for this project.
+    let mut all_targets: Vec<(String, String)> = vec![
+        ("server".to_string(), containers::server_name(id)),
+        ("app".to_string(), containers::app_name(id)),
+    ];
+    for agent in &cfg.agents {
+        all_targets.push((agent.name.clone(), containers::agent_name(id, &agent.name)));
+    }
 
-    let mut stream = docker.logs(container, Some(opts));
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(output) => print!("{output}"),
-            Err(e) => eprintln!("log error: {e}"),
+    let selected: Vec<(String, String)> = if container == "all" {
+        all_targets
+    } else {
+        // Resolve short alias to full name, or use as-is for explicit container names.
+        let full = all_targets
+            .iter()
+            .find(|(alias, _)| alias == container)
+            .map(|(_, full)| full.clone())
+            .unwrap_or_else(|| container.to_string());
+        vec![(container.to_string(), full)]
+    };
+
+    if selected.len() == 1 {
+        let (_, name) = &selected[0];
+        let opts = LogsOptionsBuilder::default()
+            .stdout(true)
+            .stderr(true)
+            .follow(follow)
+            .tail("100")
+            .build();
+        let mut stream = docker.logs(name, Some(opts));
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(output) => print!("{output}"),
+                Err(e) => eprintln!("log error: {e}"),
+            }
+        }
+    } else {
+        // Stream all containers in parallel; each task prints with a [alias] prefix.
+        let prefix_width = selected.iter().map(|(a, _)| a.len()).max().unwrap_or(6);
+        let handles: Vec<_> = selected
+            .into_iter()
+            .map(|(alias, name)| {
+                let docker = docker.clone();
+                tokio::spawn(async move {
+                    let opts = LogsOptionsBuilder::default()
+                        .stdout(true)
+                        .stderr(true)
+                        .follow(follow)
+                        .tail("100")
+                        .build();
+                    let mut stream = docker.logs(&name, Some(opts));
+                    while let Some(chunk) = stream.next().await {
+                        match chunk {
+                            Ok(output) => {
+                                print!("[{alias:<width$}] {output}", width = prefix_width)
+                            }
+                            Err(e) => eprintln!("[{alias}] log error: {e}"),
+                        }
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            let _ = h.await;
         }
     }
     Ok(())

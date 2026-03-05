@@ -17,22 +17,19 @@ hive [--version] [--help] <command> [options]
 
 ### Commands
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `init`  | | Initialize hive in the current project (write Dockerfiles + config to `.hive/`) |
-| `start` | `up` | Build images if needed, then start all containers |
-| `stop` | `down` | Stop all containers |
-| `restart` | | Restart all containers |
-| `rebuild` | | Rebuild Docker images from `.hive/Dockerfiles` |
-| `ui` | `tui` | Start the TUI (connects to hive-server) |
-| `connect` | `attach` | Alias for `ui` |
-| `status` | | Show container status |
-| `config` | `cfg` | Edit/open config |
-| `logs` | | Show logs (all, or specific container) |
-| `agent` | | Manage agents (list, spawn, kill) |
-| `task` | | Task commands (list, create, show) |
-| `topic` | | Message board commands |
-| `completion` | | Generate shell completions |
+| Command | Description |
+|---------|-------------|
+| `init`  | Initialize hive in the current project (write Dockerfiles + config to `.hive/`) |
+| `start` | Build images if needed, then start all containers |
+| `stop` | Stop all containers |
+| `restart` | Restart all containers |
+| `rebuild` | Rebuild Docker images from `.hive/Dockerfiles` |
+| `ui` | Start the TUI (connects to hive-server) |
+| `status` | Show container status |
+| `config` | Edit/open project config wizard |
+| `logs` | Show logs (all containers, or specific container) |
+| `auth` | Manage authentication (API keys, endpoints, credentials) |
+| `update` | Check for and apply updates from GitHub releases |
 
 ### Global Flags
 
@@ -305,17 +302,20 @@ level = "info"
 
 SQLite at `.hive/hive.db`. Created by hive-server on first start.
 
-## API Keys
+## Authentication (`hive auth`)
 
-Passed via environment to containers:
-- `ANTHROPIC_API_KEY` → hive-agent (for Claude Code)
-- `OPENAI_API_KEY` → hive-agent (if using OpenAI models with Kilo)
-- `KILO_API_KEY` → hive-agent (if using Kilo's cloud)
+Subcommands for managing credentials and API access:
 
-Read from:
-1. Config file (`[agent.0].api_key`)
-2. Environment variables
-3. `.env` file in `.hive/`
+| Subcommand | Description |
+|------------|-------------|
+| `auth status` | Show current auth configuration and what's detected |
+| `auth set-key KEY VALUE` | Write an API key to `.hive/.env` |
+| `auth set-endpoint KEY URL` | Write a base URL to `.hive/.env` (for third-party providers) |
+| `auth list` | List all keys/endpoints in `.hive/.env` (values masked) |
+| `auth sync` | Copy `~/.claude.json` → `.hive/claude.json` (for Claude subscription users) |
+| `auth login` | Run `claude auth login` inside the agent container |
+
+See [Authentication Guide](./06-configuration.md#authentication-guide) for full details on all auth options.
 
 ## Error Handling
 

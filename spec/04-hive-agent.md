@@ -153,32 +153,27 @@ flowchart LR
     SessionFile -->|"write"| B[Save session ID]
 ```
 
-```python
-# State file: /app/.hive/agents/{agent_id}/session
-session_file = "/app/.hive/agents/{agent_id}/session"
+```
+# Coding agent invocation (pseudocode)
 
-def run_coding_agent(task: Task, push_messages: list, resume_session: bool):
-    prompt = build_prompt(task, push_messages)
-    
-    if coding_agent == "kilo":
-        cmd = ["kilo", "run", "--auto"]
-        if resume_session and session_file.exists():
-            session_id = read(session_file)
-            cmd.extend(["-c", "-s", session_id])
-        cmd.append(prompt)
-    else:  # claude
-        cmd = ["claude", "-p", prompt]
-        if resume_session and session_file.exists():
-            session_id = read(session_file)
-            cmd = ["claude", "-r", session_id, "-p", prompt]
-    
-    result = subprocess.run(cmd, ...)
-    
-    # Extract and save session ID for resume
-    if session_id := extract_session_id(result.stdout):
-        write(session_file, session_id)
-    
-    return result
+session_id = load_session(agent_id)  # None if no prior session
+
+if coding_agent == "kilo":
+    cmd = ["kilo", "run", "--auto"]
+    if session_id:
+        cmd += ["-c", "-s", session_id]
+    cmd.append(prompt)
+
+elif coding_agent == "claude":
+    cmd = ["claude", "--dangerously-skip-permissions"]
+    if session_id:
+        cmd += ["-r", session_id]
+    cmd += ["-p", prompt]
+
+result = run(cmd)
+
+if new_session_id := extract_session_id(result.output):
+    save_session(agent_id, new_session_id)
 ```
 
 ### Push Message Delivery
@@ -267,6 +262,9 @@ async fn app_exec(
 ```
 
 ## Coding Agent Configuration
+
+> See [Authentication Guide](./06-configuration.md#authentication-guide) for how to provision credentials
+> into agent containers (API keys, Claude subscription, third-party providers).
 
 ### Kilo
 

@@ -47,19 +47,35 @@ pub async fn run(
     let prompt = build_prompt(task, messages);
     info!("Spawning '{agent_bin}' for task: {}", task.id);
 
+    let session_id = crate::session::load(agent_id);
+
     let mut cmd = Command::new(agent_bin);
-    cmd.arg("--print") // non-interactive mode
-        .env("TASK_ID", &task.id)
+    cmd.env("TASK_ID", &task.id)
         .env("TASK_TITLE", &task.title);
 
-    // Resume previous session if one exists.
-    if let Some(session_id) = crate::session::load(agent_id) {
-        for arg in crate::session::resume_args(agent_bin, &session_id) {
-            cmd.arg(arg);
+    match agent_bin {
+        "claude" => {
+            // claude --dangerously-skip-permissions [-r <session_id>] -p <prompt>
+            cmd.arg("--dangerously-skip-permissions");
+            if let Some(ref sid) = session_id {
+                cmd.args(["-r", sid]);
+            }
+            cmd.arg("-p").arg(&prompt);
+        }
+        "kilo" => {
+            // kilo run --auto [-c -s <session_id>] <prompt>
+            cmd.args(["run", "--auto"]);
+            if let Some(ref sid) = session_id {
+                cmd.args(["-c", "-s", sid]);
+            }
+            cmd.arg(&prompt);
+        }
+        other => {
+            // Unknown agent: pass prompt as sole argument.
+            warn!("Unknown coding agent '{other}', passing prompt directly");
+            cmd.arg(&prompt);
         }
     }
-
-    cmd.arg(&prompt);
 
     let output = cmd
         .output()

@@ -3,8 +3,11 @@
 pub mod io;
 mod validate;
 
-pub use io::{load, save};
+pub use io::{load, save, load_global, save_global, global_config_path};
 pub use validate::validate;
+
+/// Current config file format version. Bump when making breaking schema changes.
+pub const CONFIG_VERSION: u32 = 1;
 
 use std::collections::HashMap;
 
@@ -14,6 +17,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// Config format version. Used to run migrations when the format changes.
+    /// Absent in old configs (defaults to 0).
+    pub version: u32,
     /// Unique project identifier, used to scope Docker image/network names.
     /// Set by `hive init` and should not be changed manually.
     pub project_id: String,
@@ -23,6 +29,8 @@ pub struct Config {
     pub app: AppConfig,
     pub exec: ExecConfig,
     pub logging: LoggingConfig,
+    /// Network isolation settings.
+    pub network: NetworkConfig,
 }
 
 /// A single agent definition.
@@ -76,18 +84,35 @@ pub struct LoggingConfig {
     pub level: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NetworkConfig {
+    /// Block agent containers from reaching the internet (internal Docker network).
+    /// Set to false to allow agents to make outbound HTTP requests.
+    /// Default: true.
+    pub isolate: bool,
+}
+
 // -- Defaults --
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            version: CONFIG_VERSION,
             project_id: String::new(),
             server: ServerConfig::default(),
             agents: vec![],
             app: AppConfig::default(),
             exec: ExecConfig::default(),
             logging: LoggingConfig::default(),
+            network: NetworkConfig::default(),
         }
+    }
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self { isolate: true }
     }
 }
 
@@ -134,4 +159,54 @@ impl Default for LoggingConfig {
             level: "info".to_string(),
         }
     }
+}
+
+// -- Config migration --
+
+/// Migrate config from an older version to the current one.
+///
+/// Called automatically by `config::load` when `config.version < CONFIG_VERSION`.
+/// Add version-specific migration steps inside the match arms as the format evolves.
+pub fn migrate_config(mut config: Config) -> Config {
+    // Walk through each version step so migrations compose correctly.
+    #[allow(clippy::match_single_binding)]
+    match config.version {
+        0 => {
+            // v0 → v1: no structural changes; just stamp the version.
+        }
+        _ => {} // Already up-to-date or unknown future version.
+    }
+    config.version = CONFIG_VERSION;
+    config
+}
+
+// -- Global config (~/.config/hive/config.toml) --
+
+/// Global configuration applied as defaults across all projects.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct GlobalConfig {
+    pub defaults: GlobalDefaults,
+    pub docker: GlobalDockerConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GlobalDefaults {
+    /// Default number of agents for new projects.
+    pub agents: usize,
+}
+
+impl Default for GlobalDefaults {
+    fn default() -> Self {
+        Self { agents: 2 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct GlobalDockerConfig {
+    /// Docker socket URI (e.g. "unix:///var/run/docker.sock").
+    /// Overrides DOCKER_HOST if set.
+    pub socket: Option<String>,
 }

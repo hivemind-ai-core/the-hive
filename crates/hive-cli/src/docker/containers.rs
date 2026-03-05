@@ -224,13 +224,33 @@ async fn create_agent_container(
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let cred_mounts: &[(&str, &str)] = match agent.coding_agent.as_str() {
         "claude" => &[(".claude", "/home/agent/.claude")],
-        "kilo"   => &[(".kilocode", "/home/agent/.kilocode")],
         _        => &[],
     };
     for (src_name, container_path) in cred_mounts {
         let src = std::path::Path::new(&home).join(src_name);
         if src.exists() {
             binds.push(format!("{}:{container_path}", src.display()));
+        }
+    }
+
+    // Mount .hive/claude.json → /home/agent/.claude.json (OAuth/subscription credentials).
+    // Written by `hive auth sync` or `hive auth login`. Only mounted if present.
+    if agent.coding_agent == "claude" {
+        let claude_json = std::path::Path::new(hive_dir).join("claude.json");
+        if claude_json.exists() {
+            binds.push(format!("{}:/home/agent/.claude.json:ro", claude_json.display()));
+        }
+    }
+
+    // Mount kilo config: prefer project-local .hive/kilocode/ over global ~/.kilocode/.
+    // `hive auth kilo-sync` populates .hive/kilocode/ from the host's ~/.kilocode/.
+    if agent.coding_agent == "kilo" {
+        let local_kilo = std::path::Path::new(hive_dir).join("kilocode");
+        let global_kilo = std::path::Path::new(&home).join(".kilocode");
+        if local_kilo.exists() {
+            binds.push(format!("{}:/home/agent/.kilocode:ro", local_kilo.display()));
+        } else if global_kilo.exists() {
+            binds.push(format!("{}:/home/agent/.kilocode", global_kilo.display()));
         }
     }
 

@@ -234,6 +234,98 @@ GOOGLE_API_KEY=...
 1. hive-cli reads from `.env` in `.hive/` or host environment
 2. Passes via `-e` to docker run commands
 
+## Authentication Guide
+
+Agent containers run in Docker and **cannot access the host's global auth state** (e.g. `~/.claude.json`). You must explicitly provision credentials using one of the methods below.
+
+### Option 1: API Key (simplest, works for all providers)
+
+Add your API key to `.hive/.env`:
+
+```bash
+hive auth set-key ANTHROPIC_API_KEY sk-ant-...
+hive auth set-key OPENAI_API_KEY sk-...
+hive auth set-key GOOGLE_API_KEY AI...
+```
+
+Or edit `.hive/.env` directly:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Keys in `.hive/.env` are injected into all agent containers as environment variables. This is the recommended approach for API key users and works for both Claude Code and Kilo.
+
+### Option 2: Third-party / Custom Endpoint
+
+For OpenAI-compatible providers (Together, Groq, Ollama, custom proxies), set the base URL:
+
+```bash
+hive auth set-endpoint ANTHROPIC_BASE_URL https://my-proxy.example.com
+hive auth set-endpoint OPENAI_BASE_URL https://api.together.xyz/v1
+hive auth set-endpoint OPENAI_BASE_URL http://localhost:11434/v1  # Ollama
+```
+
+Combine with the matching API key:
+
+```bash
+hive auth set-key OPENAI_API_KEY <together-api-key>
+hive auth set-endpoint OPENAI_BASE_URL https://api.together.xyz/v1
+```
+
+### Option 3: Claude Subscription (sync from host)
+
+If you have a Claude Max/Pro subscription and have already run `claude auth login` on the host:
+
+```bash
+hive auth sync        # copies ~/.claude.json → .hive/claude.json
+hive restart          # mounts new credentials into running containers
+```
+
+`.hive/claude.json` is auto-mounted as `/home/agent/.claude.json` in all claude agent containers. Re-run `hive auth sync` when the token expires.
+
+### Option 4: Claude Subscription (login inside container)
+
+If you don't have Claude CLI on the host, authenticate directly inside the agent container:
+
+```bash
+hive auth login       # runs 'claude auth login' inside the first agent container
+```
+
+Follow the URL/code shown in the terminal. Credentials are saved back to `.hive/claude.json` and applied on next `hive restart`.
+
+### Checking Auth Status
+
+```bash
+hive auth status      # shows what credentials are detected for each agent
+hive auth list        # lists all keys/endpoints in .hive/.env (masked)
+```
+
+### What Gets Mounted into Agent Containers
+
+| Source | Container path | Condition |
+|--------|---------------|-----------|
+| `.hive/.env` vars | env vars | always (silently skipped if missing) |
+| `~/.claude/` | `/home/agent/.claude/` | if directory exists on host |
+| `.hive/claude.json` | `/home/agent/.claude.json` | if file exists |
+| `~/.kilocode/` | `/home/agent/.kilocode/` | if directory exists on host |
+
+`.hive/claude.json`, `.hive/.env`, and `.hive/bin/` are all gitignored by `hive init`.
+
+### Per-agent Environment
+
+To set env vars for a specific agent only, use the `env` map in `config.toml`:
+
+```toml
+[[agents]]
+name = "claude-1"
+coding_agent = "claude"
+tags = []
+
+[agents.env]
+ANTHROPIC_API_KEY = "sk-ant-..."   # overrides .hive/.env for this agent only
+```
+
 ## Agent Coding Configuration
 
 ### Kilo Config
@@ -316,9 +408,12 @@ flowchart TB
 project/
 ├── .hive/
 │   ├── config.toml      # Project config
-│   ├── hive.db          # SQLite database (created by hive-server)
+│   ├── hive.db          # SQLite database (created by hive-server, gitignored)
 │   ├── .env             # API keys (optional, gitignored)
-│   ├── agents/          # Agent state (session IDs, etc)
+│   ├── claude.json      # Claude OAuth credentials (gitignored, from hive auth sync/login)
+│   ├── bin/             # Pre-built binaries for containers (gitignored)
+│   ├── Dockerfile.*     # Editable container definitions
+│   ├── agents/          # Agent session state (gitignored)
 │   │   └── agent-0/
 │   │       └── session
 │   └── logs/            # Log files (optional)

@@ -66,11 +66,3 @@ pub fn extract_from_output(output: &str) -> Option<String> {
     None
 }
 
-/// Build the resume arguments for the given coding agent binary.
-pub fn resume_args(agent_bin: &str, session_id: &str) -> Vec<String> {
-    match agent_bin {
-        "kilo" => vec!["-c".to_string(), "-s".to_string(), session_id.to_string()],
-        "claude" => vec!["-r".to_string(), session_id.to_string()],
-        _ => vec![],
-    }
-}

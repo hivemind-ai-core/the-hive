@@ -16,13 +16,16 @@ pub fn network_name(project_id: &str) -> String {
 }
 
 /// Ensure the project network exists; create it if not.
-pub async fn ensure(docker: &Docker, project_id: &str) -> Result<()> {
+///
+/// If `internal` is true the network is created without an external route
+/// (agents cannot reach the internet). Existing networks are not modified.
+pub async fn ensure(docker: &Docker, project_id: &str, internal: bool) -> Result<()> {
     let name = network_name(project_id);
     if exists(docker, &name).await? {
         info!("Network '{name}' already exists");
         return Ok(());
     }
-    create(docker, &name).await
+    create(docker, &name, internal).await
 }
 
 /// Return true if the named network exists.
@@ -40,17 +43,26 @@ pub async fn exists(docker: &Docker, name: &str) -> Result<bool> {
 }
 
 /// Create the named network as a bridge.
-pub async fn create(docker: &Docker, name: &str) -> Result<()> {
+///
+/// When `internal` is true, the network is created with the Docker `internal` flag,
+/// which prevents containers from reaching the internet while still allowing
+/// container-to-container communication within the network.
+pub async fn create(docker: &Docker, name: &str, internal: bool) -> Result<()> {
     let req = NetworkCreateRequest {
         name: name.to_string(),
         driver: Some("bridge".to_string()),
+        internal: Some(internal),
         ..Default::default()
     };
     docker
         .create_network(req)
         .await
         .context("creating Docker network")?;
-    info!("Created network '{name}'");
+    if internal {
+        info!("Created internal network '{name}' (no internet access for agents)");
+    } else {
+        info!("Created network '{name}'");
+    }
     Ok(())
 }
 
