@@ -3,51 +3,73 @@
 //! Connects as a special `__tui__` observer, seeds initial state with one-shot
 //! requests, then stays connected and reacts to server-push events.
 
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use hive_core::types::{Agent, ApiMessage, MessageType, Task};
+use hive_core::types::{Agent, ApiMessage, MessageType, Task, Topic};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::warn;
 
 pub struct StateUpdate {
     pub agents: Vec<Agent>,
     pub tasks: Vec<Task>,
+    pub topics: Vec<Topic>,
+}
+
+/// Commands sent from the TUI to the poller to perform server actions.
+pub enum TuiCmd {
+    SendPush { to_agent_id: String, content: String },
+    CreateTopic { title: String, content: String },
+    CreateTask { title: String, description: String, tags: Vec<String> },
+    CreateComment { topic_id: String, content: String },
+    UpdateTask { id: String, title: String, description: String, tags: Vec<String> },
+    SetTaskStatus { id: String, status: String },
 }
 
 /// Spawn a background thread that maintains a WS connection to `server_url`
 /// and sends `StateUpdate` values through `tx` whenever state changes.
-pub fn spawn(server_url: String, tx: Sender<StateUpdate>) {
+/// Returns a `Sender<TuiCmd>` for sending commands to the server.
+pub fn spawn(server_url: String, tx: Sender<StateUpdate>) -> std::sync::mpsc::Sender<TuiCmd> {
+    let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<TuiCmd>();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("poller tokio runtime");
-        rt.block_on(run(server_url, tx));
+        rt.block_on(run(server_url, tx, cmd_rx));
     });
+    cmd_tx
 }
 
-async fn run(server_url: String, tx: Sender<StateUpdate>) {
+async fn run(server_url: String, tx: Sender<StateUpdate>, cmd_rx: Receiver<TuiCmd>) {
+    // Wrap cmd_rx in Arc<Mutex> so it can be shared with the connection loop.
+    let cmd_rx = std::sync::Arc::new(std::sync::Mutex::new(cmd_rx));
     loop {
-        if let Err(e) = connect_and_listen(&server_url, &tx).await {
+        if let Err(e) = connect_and_listen(&server_url, &tx, &cmd_rx).await {
             warn!("TUI server connection lost: {e}");
         }
         // Retry after a short delay if the TUI is still alive.
-        if tx.send(StateUpdate { agents: vec![], tasks: vec![] }).is_err() {
+        if tx.send(StateUpdate { agents: vec![], tasks: vec![], topics: vec![] }).is_err() {
             break; // TUI has exited
         }
         tokio::time::sleep(Duration::from_secs(3)).await;
     }
 }
 
-async fn connect_and_listen(server_url: &str, tx: &Sender<StateUpdate>) -> anyhow::Result<()> {
+async fn connect_and_listen(
+    server_url: &str,
+    tx: &Sender<StateUpdate>,
+    cmd_rx: &std::sync::Arc<std::sync::Mutex<Receiver<TuiCmd>>>,
+) -> anyhow::Result<()> {
     let url = format!("{server_url}?agent_id=__tui__");
     let (mut ws, _) = connect_async(&url).await?;
 
     let mut agents: Vec<Agent> = vec![];
     let mut tasks: Vec<Task> = vec![];
+    let mut topics: Vec<Topic> = vec![];
 
     // Seed initial state.
     send_request(&mut ws, "seed-agents", "agent.list", None).await?;
     send_request(&mut ws, "seed-tasks", "task.list", None).await?;
+    send_request(&mut ws, "seed-topics", "topic.list", None).await?;
 
     while let Some(raw) = ws.next().await {
         let text = match raw? {
@@ -72,6 +94,9 @@ async fn connect_and_listen(server_url: &str, tx: &Sender<StateUpdate>) -> anyho
                     "seed-tasks" => {
                         tasks = serde_json::from_value(result).unwrap_or_default();
                     }
+                    "seed-topics" => {
+                        topics = serde_json::from_value(result).unwrap_or_default();
+                    }
                     _ => continue,
                 }
             }
@@ -85,13 +110,72 @@ async fn connect_and_listen(server_url: &str, tx: &Sender<StateUpdate>) -> anyho
                     "tasks.updated" => {
                         tasks = serde_json::from_value(params).unwrap_or_default();
                     }
+                    "topics.updated" => {
+                        topics = serde_json::from_value(params).unwrap_or_default();
+                    }
                     _ => continue,
                 }
             }
             _ => continue,
         }
 
-        if tx.send(StateUpdate { agents: agents.clone(), tasks: tasks.clone() }).is_err() {
+        // Drain any pending TUI commands and forward to server.
+        if let Ok(guard) = cmd_rx.try_lock() {
+            while let Ok(cmd) = guard.try_recv() {
+                match cmd {
+                    TuiCmd::SendPush { to_agent_id, content } => {
+                        let _ = send_request(
+                            &mut ws,
+                            &uuid::Uuid::new_v4().to_string(),
+                            "push.send",
+                            Some(serde_json::json!({ "to_agent_id": to_agent_id, "content": content })),
+                        ).await;
+                    }
+                    TuiCmd::CreateTopic { title, content } => {
+                        let _ = send_request(
+                            &mut ws,
+                            &uuid::Uuid::new_v4().to_string(),
+                            "topic.create",
+                            Some(serde_json::json!({ "title": title, "content": content, "creator_agent_id": "__tui__" })),
+                        ).await;
+                    }
+                    TuiCmd::CreateTask { title, description, tags } => {
+                        let _ = send_request(
+                            &mut ws,
+                            &uuid::Uuid::new_v4().to_string(),
+                            "task.create",
+                            Some(serde_json::json!({ "title": title, "description": description, "tags": tags })),
+                        ).await;
+                    }
+                    TuiCmd::SetTaskStatus { id, status } => {
+                        let _ = send_request(
+                            &mut ws,
+                            &uuid::Uuid::new_v4().to_string(),
+                            "task.update",
+                            Some(serde_json::json!({ "id": id, "status": status })),
+                        ).await;
+                    }
+                    TuiCmd::UpdateTask { id, title, description, tags } => {
+                        let _ = send_request(
+                            &mut ws,
+                            &uuid::Uuid::new_v4().to_string(),
+                            "task.update",
+                            Some(serde_json::json!({ "id": id, "title": title, "description": description, "tags": tags })),
+                        ).await;
+                    }
+                    TuiCmd::CreateComment { topic_id, content } => {
+                        let _ = send_request(
+                            &mut ws,
+                            &uuid::Uuid::new_v4().to_string(),
+                            "topic.comment",
+                            Some(serde_json::json!({ "topic_id": topic_id, "content": content, "creator_agent_id": "__tui__" })),
+                        ).await;
+                    }
+                }
+            }
+        }
+
+        if tx.send(StateUpdate { agents: agents.clone(), tasks: tasks.clone(), topics: topics.clone() }).is_err() {
             break; // TUI has exited
         }
     }

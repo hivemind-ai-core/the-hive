@@ -75,18 +75,6 @@ pub fn upsert_agent(pool: &DbPool, agent: &Agent) -> Result<()> {
     Ok(())
 }
 
-pub fn get_agent(pool: &DbPool, id: &str) -> Result<Option<Agent>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, name, tags, connected_at, last_seen_at FROM agents WHERE id = ?1",
-    )?;
-    let mut rows = stmt.query(params![id])?;
-    if let Some(row) = rows.next()? {
-        Ok(Some(row_to_agent(row)?))
-    } else {
-        Ok(None)
-    }
-}
 
 pub fn list_agents(pool: &DbPool) -> Result<Vec<Agent>> {
     let conn = pool.get()?;

@@ -199,6 +199,7 @@ fn add_agent(state: &mut ConfigWizardState) {
         name: format!("kilo-{n}"),
         coding_agent: "kilo".to_string(),
         tags: vec![],
+        env: Default::default(),
     };
     state.config.agents.push(agent);
     let new_idx = state.config.agents.len() - 1;

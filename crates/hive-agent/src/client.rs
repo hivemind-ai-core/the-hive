@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use hive_core::types::{ApiMessage, MessageType};
 use tokio::sync::{mpsc::{self, UnboundedReceiver, UnboundedSender}, oneshot};

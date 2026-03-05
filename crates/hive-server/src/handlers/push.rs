@@ -4,7 +4,7 @@ use anyhow::Result;
 use hive_core::types::PushMessage;
 use serde::Deserialize;
 use serde_json::Value;
-use tokio_tungstenite::tungstenite::Message;
+use axum::extract::ws::Message;
 use tracing::warn;
 
 use crate::{communication as db_comm, db::DbPool, state::Clients};
@@ -39,7 +39,7 @@ pub fn send(
         if let Some(tx) = guard.get(&p.to_agent_id) {
             let push = crate::ws::make_push(serde_json::to_value(&msg)?);
             if let Ok(json) = serde_json::to_string(&push) {
-                let _ = tx.send(Message::text(json));
+                let _ = tx.send(Message::Text(json.into()));
                 drop(guard);
                 if let Err(e) = db_comm::mark_delivered(pool, &msg.id) {
                     warn!("Failed to mark message {} as delivered: {e}", msg.id);

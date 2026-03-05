@@ -1,4 +1,6 @@
+pub mod agents_screen;
 pub mod app;
+pub mod settings_screen;
 pub mod config;
 pub mod dashboard;
 pub mod events;

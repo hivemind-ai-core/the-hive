@@ -6,8 +6,6 @@ pub mod screens;
 mod state;
 mod wizard;
 
-pub use state::WizardScreen;
-
 use anyhow::Result;
 
 use crate::config::Config;

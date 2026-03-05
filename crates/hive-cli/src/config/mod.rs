@@ -35,6 +35,10 @@ pub struct Agent {
     /// Tags assigned to this agent.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Extra environment variables passed to this agent's container.
+    /// Merged on top of any project-wide .hive/.env values.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -16,6 +16,8 @@ pub fn render_header(f: &mut Frame, area: Rect, app: &App) {
         ("1:Dashboard", Screen::Dashboard),
         ("2:Tasks", Screen::Tasks),
         ("3:Board", Screen::MessageBoard),
+        ("4:Agents", Screen::Agents),
+        ("5:Settings", Screen::Settings),
     ];
     let spans: Vec<Span> = tabs
         .iter()
@@ -95,9 +97,3 @@ fn render_tasks(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(List::new(items).block(block), area);
 }
 
-pub fn render_footer(f: &mut Frame, area: Rect) {
-    f.render_widget(
-        Paragraph::new("Tab:switch  1/2/3:screen  q:quit  j/k:navigate"),
-        area,
-    );
-}

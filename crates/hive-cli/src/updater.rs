@@ -76,7 +76,7 @@ fn is_newer(latest: &str, current: &str) -> bool {
 
 async fn download_tarball(url: &str, name: &str) -> Result<std::path::PathBuf> {
     let tmp = tempfile::tempdir().context("creating temp dir")?;
-    let tmp_path = tmp.into_path(); // keep temp dir alive
+    let tmp_path = tmp.keep();
 
     let client = reqwest::Client::builder()
         .user_agent(version::user_agent())
@@ -105,6 +105,7 @@ async fn download_tarball(url: &str, name: &str) -> Result<std::path::PathBuf> {
 }
 
 fn apply_update(tmp_dir: &Path, ver: &str, target: &str) -> Result<()> {
+    install::ensure_dirs()?;
     let extracted = tmp_dir.join(format!("hive-{ver}-{target}"));
     let bin_dir = install::hive_bin_dir();
     let docker_dir = install::hive_docker_dir();

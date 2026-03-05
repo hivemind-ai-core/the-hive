@@ -1,71 +1,58 @@
-//! WebSocket server: accepts agent connections, tracks them, routes messages.
+//! HTTP + WebSocket server: /health for Docker healthcheck, /ws for agents.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use anyhow::Result;
+use axum::{
+    Router,
+    extract::{Query, State, WebSocketUpgrade, ws::{Message, WebSocket}},
+    response::IntoResponse,
+    routing::get,
+};
 use futures_util::{SinkExt, StreamExt};
 use hive_core::types::{ApiError, ApiMessage, MessageType};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use tokio_tungstenite::{
-    accept_hdr_async,
-    tungstenite::{
-        handshake::server::{Request, Response},
-        Message,
-    },
-};
 use tracing::{info, warn};
 
 use crate::{communication, handlers, state::AppState, tasks as db_tasks};
 
-use form_urlencoded;
-
-/// Start the WebSocket accept loop. Runs forever.
+/// Start the HTTP + WebSocket server. Runs forever.
 pub async fn serve(addr: SocketAddr, state: AppState) -> Result<()> {
-    let listener = TcpListener::bind(addr).await?;
-    info!("WebSocket server listening on {addr}");
+    let app = Router::new()
+        .route("/health", get(health_handler))
+        .route("/ws", get(ws_handler))
+        .with_state(state);
 
-    loop {
-        match listener.accept().await {
-            Ok((stream, peer)) => {
-                let state = state.clone();
-                tokio::spawn(handle_connection(stream, peer, state));
-            }
-            Err(e) => warn!("Accept error: {e}"),
-        }
-    }
+    let listener = TcpListener::bind(addr).await?;
+    info!("HTTP+WebSocket server listening on {addr}");
+
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
-async fn handle_connection(stream: TcpStream, peer: SocketAddr, state: AppState) {
-    // Extract agent_id from the request URL query string during the WS handshake.
-    let mut agent_id = String::new();
+async fn health_handler() -> &'static str {
+    "ok"
+}
 
-    let ws_stream = match accept_hdr_async(stream, |req: &Request, res: Response| {
-        if let Some(query) = req.uri().query() {
-            for (k, v) in url_query_pairs(query) {
-                if k == "agent_id" {
-                    agent_id = v;
-                }
-            }
-        }
-        Ok(res)
-    })
-    .await
-    {
-        Ok(ws) => ws,
-        Err(e) => {
-            warn!("WS handshake failed from {peer}: {e}");
-            return;
-        }
-    };
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    Query(params): Query<HashMap<String, String>>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let agent_id = params.get("agent_id").cloned().unwrap_or_default();
+    ws.on_upgrade(move |socket| handle_connection(socket, agent_id, state))
+}
 
+async fn handle_connection(socket: WebSocket, agent_id: String, state: AppState) {
     if agent_id.is_empty() {
-        warn!("Connection from {peer} rejected: missing agent_id");
+        warn!("Connection rejected: missing agent_id");
         return;
     }
 
-    info!("Agent '{agent_id}' connected from {peer}");
+    info!("Agent '{agent_id}' connected");
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
@@ -77,7 +64,7 @@ async fn handle_connection(stream: TcpStream, peer: SocketAddr, state: AppState)
         }
     }
 
-    let (mut ws_sink, mut ws_stream) = ws_stream.split();
+    let (mut ws_sink, mut ws_stream) = socket.split();
 
     // Forward outbound messages from the channel to the WebSocket.
     let send_task = tokio::spawn(async move {
@@ -138,6 +125,7 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
         "task.set_dependency"=> handle(&msg.id, handlers::tasks::set_dependency(&state.db, msg.params)),
         "topic.create"  => handle(&msg.id, handlers::message_board::create(&state.db, msg.params)),
         "topic.list"    => handle(&msg.id, handlers::message_board::list(&state.db, msg.params)),
+        "topic.list_new" => handle(&msg.id, handlers::message_board::list_new(&state.db, msg.params)),
         "topic.get"     => handle(&msg.id, handlers::message_board::get(&state.db, msg.params)),
         "topic.comment" => handle(&msg.id, handlers::message_board::comment(&state.db, msg.params)),
         "topic.wait"    => handle(&msg.id, handlers::message_board::wait(&state.db, msg.params)),
@@ -170,7 +158,7 @@ fn send_to(agent_id: &str, msg: ApiMessage, state: &AppState) {
         Ok(clients) => {
             if let Some(tx) = clients.get(agent_id) {
                 if let Ok(json) = serde_json::to_string(&msg) {
-                    let _ = tx.send(Message::text(json));
+                    let _ = tx.send(Message::Text(json.into()));
                 }
             }
         }
@@ -230,7 +218,7 @@ fn broadcast(method: &str, payload: serde_json::Value, state: &AppState) {
     if let Ok(json) = serde_json::to_string(&msg) {
         if let Ok(clients) = state.clients.lock() {
             for tx in clients.values() {
-                let _ = tx.send(Message::text(json.clone()));
+                let _ = tx.send(Message::Text(json.clone().into()));
             }
         }
     }
@@ -256,8 +244,3 @@ fn broadcast_agents(state: &AppState) {
     }
 }
 
-/// Parse `key=value&...` query string pairs with proper percent-decoding.
-fn url_query_pairs(query: &str) -> impl Iterator<Item = (String, String)> + '_ {
-    form_urlencoded::parse(query.as_bytes())
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-}

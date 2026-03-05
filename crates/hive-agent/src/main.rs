@@ -42,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
 
     let (cmd_tx, pending, _push_rx) = client::start(server_url, agent_id.clone(), agent_name, agent_tags.clone());
 
-    start_mcp_server(&agent_id, &app_daemon_url, cmd_tx.clone());
+    start_mcp_server(&agent_id, &app_daemon_url, cmd_tx.clone(), pending.clone());
 
     let agent = Agent::new(agent_id, agent_tags, coding_agent, cmd_tx.clone(), pending);
     agent.spawn_polling();
@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn start_mcp_server(agent_id: &str, app_daemon_url: &str, cmd_tx: tokio::sync::mpsc::UnboundedSender<client::ClientCmd>) {
+fn start_mcp_server(agent_id: &str, app_daemon_url: &str, cmd_tx: tokio::sync::mpsc::UnboundedSender<client::ClientCmd>, pending: client::PendingRequests) {
     let mcp_port: u16 = std::env::var("HIVE_MCP_PORT")
         .unwrap_or_else(|_| "7890".to_string())
         .parse()
@@ -63,6 +63,7 @@ fn start_mcp_server(agent_id: &str, app_daemon_url: &str, cmd_tx: tokio::sync::m
     let mcp_state = mcp::server::McpState {
         agent_id: agent_id.to_string(),
         cmd_tx,
+        pending,
         app_daemon_url: app_daemon_url.to_string(),
         http: reqwest::Client::new(),
     };

@@ -174,16 +174,6 @@ pub fn list_tasks(
     rows.map(|r| r.context("reading task row")).collect()
 }
 
-pub fn get_dependencies(pool: &DbPool, task_id: &str) -> Result<Vec<String>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
-        "SELECT depends_on_id FROM task_dependencies WHERE task_id = ?1",
-    )?;
-    let ids: Result<Vec<String>, _> = stmt
-        .query_map(params![task_id], |row| row.get(0))?
-        .collect();
-    Ok(ids.context("reading dependencies")?)
-}
 
 // -- helpers --
 

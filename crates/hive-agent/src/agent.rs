@@ -65,8 +65,16 @@ impl Agent {
 
             let result = crate::executor::run(&task, &coding_agent, &agent_id, &[]).await;
             let result_str = match result {
-                Ok(r) => Some(r.output),
-                Err(e) => Some(format!("error: {e}")),
+                Ok(r) => {
+                    if r.exit_code != 0 {
+                        crate::session::clear(&agent_id);
+                    }
+                    Some(r.output)
+                }
+                Err(e) => {
+                    crate::session::clear(&agent_id);
+                    Some(format!("error: {e}"))
+                }
             };
 
             let complete_req = client::request(

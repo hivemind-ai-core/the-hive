@@ -53,8 +53,6 @@ pub fn get(pool: &DbPool, params: Option<Value>) -> Result<Value> {
 }
 
 pub fn update(pool: &DbPool, params: Option<Value>) -> Result<Value> {
-    use hive_core::types::TaskStatus;
-
     let p = params.unwrap_or(Value::Null);
     let id = p.get("id")
         .and_then(|v| v.as_str())

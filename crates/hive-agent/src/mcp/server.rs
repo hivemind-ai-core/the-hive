@@ -12,9 +12,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 
-pub use reqwest::Client as HttpClient;
-
-use crate::client::ClientCmd;
+use crate::client::{ClientCmd, PendingRequests};
 
 /// JSON-RPC 2.0 request.
 #[derive(Debug, Deserialize)]
@@ -56,6 +54,7 @@ impl RpcResponse {
 pub struct McpState {
     pub agent_id: String,
     pub cmd_tx: UnboundedSender<ClientCmd>,
+    pub pending: PendingRequests,
     pub app_daemon_url: String,
     pub http: reqwest::Client,
 }

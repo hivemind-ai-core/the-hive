@@ -47,14 +47,6 @@ pub fn hive_version_file() -> PathBuf {
     hive_home().join("version")
 }
 
-/// Reads `~/.hive/version`. Returns `None` if not present or not readable.
-pub fn installed_version() -> Option<String> {
-    std::fs::read_to_string(hive_version_file())
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
 /// Returns `true` if the hive-server binary and Dockerfile.server both exist,
 /// indicating that the installation is present.
 pub fn is_installed() -> bool {

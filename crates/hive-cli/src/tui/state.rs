@@ -22,9 +22,20 @@ impl From<&Task> for TaskSummary {
     }
 }
 
+/// Lightweight topic summary for display.
+#[derive(Default, Clone)]
+pub struct TopicSummary {
+    pub id: String,
+    pub title: String,
+    pub comment_count: usize,
+    pub last_updated: Option<String>,
+}
+
 #[derive(Default)]
 pub struct AppState {
     pub agents: Vec<Agent>,
     pub tasks: Vec<TaskSummary>,
     pub selected_task_idx: usize,
+    pub topics: Vec<TopicSummary>,
+    pub selected_topic_idx: usize,
 }

@@ -131,6 +131,7 @@ pub async fn stop(project_dir: &Path, remove: bool) -> Result<()> {
         }
         lifecycle::remove(&docker, &containers::app_name(id)).await?;
         lifecycle::remove(&docker, &containers::server_name(id)).await?;
+        network::remove(&docker, &network::network_name(id)).await?;
         info!("All containers stopped and removed");
     } else {
         info!("All containers stopped");
@@ -232,6 +233,66 @@ pub async fn status(project_dir: &Path) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// `hive auth sync` — copy ~/.claude.json to .hive/claude.json for use in agent containers.
+pub fn auth_sync(project_dir: &Path) -> Result<()> {
+    let src = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?
+        .join(".claude.json");
+
+    if !src.exists() {
+        anyhow::bail!(
+            "~/.claude.json not found.\n\
+             Run 'claude auth login' on the host first, or use 'hive auth login' to authenticate inside a container."
+        );
+    }
+
+    let dst = hive_dir(project_dir).join("claude.json");
+    std::fs::copy(&src, &dst).context("copying ~/.claude.json to .hive/claude.json")?;
+    println!("Copied ~/.claude.json → .hive/claude.json");
+    println!("Run 'hive restart' to mount the credentials into running agent containers.");
+    Ok(())
+}
+
+/// `hive auth login [--email]` — run `claude auth login` inside the first agent container,
+/// stream the URL to stdout, and copy the resulting credentials to .hive/claude.json.
+pub async fn auth_login(project_dir: &Path, email: Option<&str>) -> Result<()> {
+    let cfg = load_config(project_dir)?;
+    let id = &cfg.project_id;
+    let agent = cfg.agents.first()
+        .ok_or_else(|| anyhow::anyhow!("No agents configured in .hive/config.toml"))?;
+    let container = containers::agent_name(id, &agent.name);
+
+    println!("Running 'claude auth login' in container '{container}'…");
+
+    let mut cmd = std::process::Command::new("docker");
+    cmd.arg("exec").arg("-i").arg(&container).arg("claude").arg("auth").arg("login");
+    if let Some(email) = email {
+        cmd.arg("--email").arg(email);
+    }
+
+    let status = cmd.status().context("running docker exec")?;
+    if !status.success() {
+        anyhow::bail!("claude auth login exited with status {status}");
+    }
+
+    // Copy credentials from the container back to .hive/claude.json.
+    let dst = hive_dir(project_dir).join("claude.json");
+    let src_in_container = format!("{container}:/home/agent/.claude.json");
+    let cp_status = std::process::Command::new("docker")
+        .args(["cp", &src_in_container, dst.to_str().unwrap_or(".")])
+        .status()
+        .context("copying .claude.json from container")?;
+
+    if cp_status.success() {
+        println!("Credentials saved to .hive/claude.json");
+        println!("Run 'hive restart' to mount the new credentials into all agent containers.");
+    } else {
+        println!("Warning: could not copy credentials from container. Try 'hive auth sync' after authenticating on the host.");
+    }
+
     Ok(())
 }
 

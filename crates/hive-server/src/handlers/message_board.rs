@@ -29,6 +29,16 @@ pub fn list(pool: &DbPool, _params: Option<Value>) -> Result<Value> {
     Ok(serde_json::to_value(&topics)?)
 }
 
+pub fn list_new(pool: &DbPool, params: Option<Value>) -> Result<Value> {
+    let since = params
+        .as_ref()
+        .and_then(|v| v.get("since"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let topics = db_mb::list_topics_since(pool, since)?;
+    Ok(serde_json::to_value(&topics)?)
+}
+
 pub fn comment(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     use hive_core::types::Comment;
     #[derive(serde::Deserialize)]

@@ -13,17 +13,6 @@ use bollard::{
 };
 use tracing::{info, warn};
 
-const HIVE_CONTAINERS: &[&str] = &["hive-server", "hive-app"];
-
-/// All container names for the current config (server + app + agents).
-pub fn all_container_names(agent_count: u8) -> Vec<String> {
-    let mut names: Vec<String> = HIVE_CONTAINERS.iter().map(|s| s.to_string()).collect();
-    for i in 1..=agent_count {
-        names.push(format!("hive-agent-{i}"));
-    }
-    names
-}
-
 pub async fn start(docker: &Docker, name: &str) -> Result<()> {
     let opts = StartContainerOptionsBuilder::default().build();
     docker
@@ -44,11 +33,6 @@ pub async fn stop(docker: &Docker, name: &str) -> Result<()> {
         Err(e) => return Err(e).context(format!("stopping container '{name}'")),
     }
     Ok(())
-}
-
-pub async fn restart(docker: &Docker, name: &str) -> Result<()> {
-    stop(docker, name).await?;
-    start(docker, name).await
 }
 
 pub async fn remove(docker: &Docker, name: &str) -> Result<()> {

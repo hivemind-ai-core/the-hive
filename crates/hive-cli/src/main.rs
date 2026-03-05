@@ -68,6 +68,23 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+    /// Manage agent authentication (Claude OAuth / API keys)
+    Auth {
+        #[command(subcommand)]
+        action: AuthAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum AuthAction {
+    /// Copy ~/.claude.json to .hive/claude.json for use in agent containers
+    Sync,
+    /// Run 'claude auth login' inside the agent container (for OAuth/subscription users)
+    Login {
+        /// Email address for the Claude account
+        #[arg(long)]
+        email: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -98,9 +115,13 @@ async fn main() -> anyhow::Result<()> {
         Commands::Ui => {
             let cfg = config::load(&config::io::default_path(&args.directory))?;
             let server_url = format!("ws://localhost:{}/ws", cfg.server.host_port);
-            tui::app::run(server_url)?;
+            tui::app::run(server_url, args.directory.clone(), cfg)?;
         }
         Commands::Update { check } => updater::run(check).await?,
+        Commands::Auth { action } => match action {
+            AuthAction::Sync => commands::auth_sync(&args.directory)?,
+            AuthAction::Login { email } => commands::auth_login(&args.directory, email.as_deref()).await?,
+        },
     }
 
     Ok(())

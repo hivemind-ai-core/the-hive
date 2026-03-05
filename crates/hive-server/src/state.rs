@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use axum::extract::ws::Message;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio_tungstenite::tungstenite::Message;
 
 use crate::db::DbPool;
 
