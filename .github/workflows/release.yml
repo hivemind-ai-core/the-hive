@@ -1,0 +1,171 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Build Linux AMD64 binaries first — these go into every release tarball
+  # (server/agent/daemon always run in Docker on Linux AMD64)
+  linux-amd64:
+    name: Build Linux AMD64 binaries
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build workspace (Linux AMD64)
+        run: cargo build --release --workspace --target x86_64-unknown-linux-gnu
+
+      - name: Upload Linux AMD64 binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64-binaries
+          path: |
+            target/x86_64-unknown-linux-gnu/release/hive
+            target/x86_64-unknown-linux-gnu/release/hive-server
+            target/x86_64-unknown-linux-gnu/release/hive-agent
+            target/x86_64-unknown-linux-gnu/release/app-daemon
+
+  # Build per-platform and assemble release tarballs
+  build:
+    name: Build ${{ matrix.target }}
+    needs: linux-amd64
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            cross: true
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            cross: false
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (for aarch64 Linux)
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build hive CLI for this platform
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release -p hive-cli --target ${{ matrix.target }}
+          else
+            cargo build --release -p hive-cli --target ${{ matrix.target }}
+          fi
+
+      - name: Download Linux AMD64 binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-amd64-binaries
+          path: linux-amd64/
+
+      - name: Assemble release tarball
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARGET="${{ matrix.target }}"
+          DIR="hive-${VERSION}-${TARGET}"
+
+          mkdir -p "${DIR}/docker"
+
+          # Host CLI binary
+          cp "target/${{ matrix.target }}/release/hive" "${DIR}/hive"
+
+          # Container binaries are always Linux AMD64
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            cp "target/x86_64-unknown-linux-gnu/release/hive-server" "${DIR}/hive-server"
+            cp "target/x86_64-unknown-linux-gnu/release/hive-agent"  "${DIR}/hive-agent"
+            cp "target/x86_64-unknown-linux-gnu/release/app-daemon"  "${DIR}/app-daemon"
+          else
+            cp linux-amd64/hive-server "${DIR}/hive-server"
+            cp linux-amd64/hive-agent  "${DIR}/hive-agent"
+            cp linux-amd64/app-daemon  "${DIR}/app-daemon"
+          fi
+
+          # Docker templates
+          cp crates/hive-cli/src/templates/Dockerfile.server "${DIR}/docker/"
+          cp crates/hive-cli/src/templates/Dockerfile.agent  "${DIR}/docker/"
+          cp crates/hive-cli/src/templates/Dockerfile.app    "${DIR}/docker/"
+
+          # Version file
+          echo "${VERSION}" > "${DIR}/version"
+
+          # Make binaries executable
+          chmod +x "${DIR}/hive" "${DIR}/hive-server" "${DIR}/hive-agent" "${DIR}/app-daemon"
+
+          # Create tarball
+          tar -czf "hive-${VERSION}-${TARGET}.tar.gz" "${DIR}/"
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.target }}
+          path: hive-*.tar.gz
+
+  # Create GitHub release and upload all tarballs
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all tarballs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tarball-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "hive v${VERSION}" \
+            --generate-notes \
+            hive-*.tar.gz

@@ -7,39 +7,73 @@ Three container types:
 2. `hive-agent` - Agent executor (N instances)
 3. `app-container` - Shared dev environment with app-daemon
 
+## Design Principle: Project-Local Images
+
+Dockerfiles live in `.hive/` inside the user's project. They are **not** pulled from a registry.
+Instead:
+
+1. `hive init` writes Dockerfiles to `.hive/` (embedded in the CLI binary)
+2. `hive start` builds images from those Dockerfiles if not already built
+3. Image names are scoped to the project to avoid conflicts across projects
+
+Users can edit `.hive/Dockerfile.*` to add custom tools or dependencies.
+
+### User Workflow
+
+```
+cd ~/my-project
+hive init          # writes .hive/Dockerfile.*, .hive/config.toml
+hive start         # builds images if needed, starts containers
+hive stop          # stops containers (images + db intact)
+hive start         # fast restart, images already built
+```
+
+### Image Naming
+
+Images are named using the project ID stored in `.hive/config.toml`:
+
+```
+hive-server-{project-id}:latest
+hive-agent-{project-id}:latest
+app-container-{project-id}:latest
+```
+
+Where `project-id` is a short slug derived from the project directory name (e.g., `my-project`),
+stored on first `hive init`.
+
 ## Deployment Diagram
 
 ```mermaid
 flowchart TB
     subgraph DockerHost["Docker Host"]
-        subgraph Network["Network: hive-net"]
+        subgraph Network["Network: hive-net-{project-id}"]
             Server["hive-server<br/>(:8080)"]
             App["app-container<br/>(:8081, :3000)"]
-            
+
             subgraph Agents["hive-agent containers"]
                 A0["hive-agent-0<br/>(kilo)"]
                 A1["hive-agent-1<br/>(claude)"]
             end
         end
-        
+
         subgraph Volumes["Volume Mounts"]
             V1[".hive/ → /data<br/>(hive-server)"]
             V2[". → /app<br/>(app, agents)"]
             V3[".hive/ → /app/.hive:ro<br/>(hidden)"]
         end
     end
-    
+
     HostCLI["hive-cli"] -->|"docker API"| Server
     HostCLI -->|"docker API"| App
     HostCLI -->|"docker API"| A0
     HostCLI -->|"docker API"| A1
-    
+
     A0 <-->|"WS"| Server
     A1 <-->|"WS"| Server
-    
+
     A0 <-->|"HTTP"| App
     A1 <-->|"HTTP"| App
-    
+
     style Network fill:#eef
     style Server fill:#bbf,stroke:#333
     style App fill:#bfb,stroke:#333
@@ -48,42 +82,58 @@ flowchart TB
 
 ## Networks
 
-**Bridge network: `hive-net`**
+**Bridge network: `hive-net-{project-id}`**
 
-```bash
-docker network create hive-net 2>/dev/null || true
+Created by `hive start`, scoped per-project so multiple projects can run simultaneously.
+
+## `.hive/` Directory Layout
+
 ```
+.hive/
+  config.toml          # Config (project id, agents, etc.)
+  hive.db              # SQLite database (created by hive-server)
+  Dockerfile.server    # Editable by user
+  Dockerfile.agent     # Editable by user
+  Dockerfile.app       # Editable by user
+```
+
+The Dockerfiles are written by `hive init` from templates embedded in the CLI binary.
 
 ## Container: hive-server
 
-### Dockerfile
+### Dockerfile (`.hive/Dockerfile.server`)
 
 ```dockerfile
-FROM rust:1.75-slim AS builder
+FROM rust:1.85-slim AS builder
 
 WORKDIR /build
-COPY hive-server/ ./
-RUN cargo build --release
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+RUN cargo build --release -p hive-server
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /build/target/release/hive-server /usr/local/bin/
+
 RUN useradd -m -u 1000 hive
 USER hive
 WORKDIR /data
+
+ENV RUST_LOG=info
+ENV HIVE_SERVER_PORT=8080
+ENV HIVE_DB_PATH=/data/hive.db
+
 CMD ["hive-server"]
-```
-
-### Run Command
-
-```bash
-docker run -d \
-  --name hive-server \
-  --network hive-net \
-  -p 8080:8080 \
-  -v $(pwd)/.hive:/data \
-  -e RUST_LOG=info \
-  hive-server:latest
 ```
 
 ### Ports
@@ -92,11 +142,29 @@ docker run -d \
 |------|----------|-------------|
 | 8080 | WS/TCP   | Agent connections, API |
 
+### Volumes
+
+| Host Path | Container Path | Options |
+|-----------|----------------|---------|
+| `.hive/`  | `/data`        | rw      |
+
 ## Container: hive-agent
 
-### Dockerfile
+### Dockerfile (`.hive/Dockerfile.agent`)
 
 ```dockerfile
+FROM rust:1.85-slim AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+RUN cargo build --release -p hive-agent
+
 FROM debian:bookworm-slim
 
 # Install base tools
@@ -106,10 +174,11 @@ RUN apt-get update && apt-get install -y \
     findutils \
     grep \
     sed \
-    awk \
+    gawk \
     jq \
     fzf \
-    httpie \
+    ca-certificates \
+    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js
@@ -118,7 +187,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && npm install -g pnpm \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Rust
+# Install Rust (for agents that compile code)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
@@ -128,65 +197,50 @@ RUN npm install -g @kilocode/cli
 # Install Claude Code
 RUN curl -fsSL https://claude.ai/install.sh | sh
 
-# Copy hive-agent binary
-COPY hive-agent/target/release/hive-agent /usr/local/bin/
+COPY --from=builder /build/target/release/hive-agent /usr/local/bin/
 
-# Create user (non-root for safety)
 RUN useradd -m -u 1000 agent
 USER agent
-
 WORKDIR /app
+
 CMD ["hive-agent"]
 ```
 
-### Run Command
+**Note**: Users can add tools to this Dockerfile (e.g., `python3`, `golang-go`) to match their
+project's needs. Run `hive rebuild` after editing.
 
-```bash
-docker run -d \
-  --name hive-agent-0 \
-  --network hive-net \
-  -v $(pwd):/app:Delegated \
-  -v $(pwd)/.hive:/app/.hive:ro \
-  -e HIVE_AGENT_ID=agent-0 \
-  -e HIVE_SERVER_URL=ws://hive-server:8080 \
-  -e HIVE_APP_DAEMON_URL=http://app-container:8081 \
-  -e CODING_AGENT=kilo \
-  -e AGENT_TAGS=backend \
-  -e ANTHROPIC_API_KEY \
-  hive-agent:latest
-```
+### Volumes
+
+| Host Path | Container Path | Options    |
+|-----------|----------------|------------|
+| `.`       | `/app`         | rw         |
+| `.hive/`  | `/app/.hive`   | ro (hidden)|
+
+The `.hive/` mount is read-only so agents cannot tamper with hive config or the DB.
 
 ### Security
 
-```mermaid
-flowchart LR
-    subgraph Container["hive-agent container"]
-        User["agent user<br/>(non-root)"]
-        FS["Filesystem<br/>/app: rw<br/>/etc: ro"]
-        Net["Network<br/hive-server<br/app-container<br/localhost"]
-    end
-    
-    subgraph Restrictions["Security"]
-        IP["iptables<br/>(block internet)"]
-        RO["Read-only<br/base"]
-    end
-    
-    User --> FS
-    User --> Net
-    Net -->|deny| IP
-    FS -->|deny| RO
-```
-
 - **User**: Runs as non-root `agent` user
-- **Filesystem**: Only `/app` is writable
-- **Network**: Can reach hive-server, app-container, localhost
-- **iptables**: Drop all other outbound (optional, advanced)
+- **Filesystem**: Project directory (`/app`) is writable; `/app/.hive` is read-only
+- **Network**: Can reach hive-server, app-container, localhost only (no internet by default)
 
 ## Container: app-container
 
-### Dockerfile
+### Dockerfile (`.hive/Dockerfile.app`)
 
 ```dockerfile
+FROM rust:1.85-slim AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+RUN cargo build --release -p app-daemon
+
 FROM debian:bookworm-slim
 
 # Install base tools
@@ -194,6 +248,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     build-essential \
+    ca-certificates \
+    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js
@@ -206,246 +262,136 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install Python + pytest
-RUN apt-get update && apt-get install -y python3 python3-pip \
-    && pip3 install pytest \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/target/release/app-daemon /usr/local/bin/
 
-# Install Go (for Go projects)
-RUN apt-get update && apt-get install -y golang-go \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy app-daemon binary
-COPY app-daemon/target/release/app-daemon /usr/local/bin/
-
-# Expose ports
 EXPOSE 8081 3000
-
 WORKDIR /app
+
+ENV HIVE_APP_DAEMON_PORT=8081
+
 CMD ["app-daemon"]
 ```
 
-### Run Command
+### Volumes
 
-```bash
-docker run -d \
-  --name app-container \
-  --network hive-net \
-  -v $(pwd):/app:Delegated \
-  -v $(pwd)/.hive:/app/.hive:ro \
-  -p 3000:3000 \
-  app-container:latest
-```
+| Host Path | Container Path | Options    |
+|-----------|----------------|------------|
+| `.`       | `/app`         | rw         |
+| `.hive/`  | `/app/.hive`   | ro (hidden)|
 
 ## app-daemon
 
-A simple HTTP server running in `app-container`.
-
-### API Flow
-
-```mermaid
-sequenceDiagram
-    participant Agent as hive-agent
-    participant Daemon as app-daemon
-    participant App as Project App
-    
-    Agent->>Daemon: POST /exec {command: "test", pattern: "auth"}
-    Daemon->>Daemon: Map command to npm script
-    Daemon->>App: npm test -- auth
-    App-->>Daemon: stdout/stderr
-    Daemon-->>Agent: {status: "ok", output: "...", exit_code: 0}
-```
+A simple HTTP server running in `app-container` that wraps project commands.
 
 ### API
 
 ```
-POST /exec
-Content-Type: application/json
-
-{
-  "command": "start|stop|restart|test|check|logs",
-  "pattern": "optional test filter"
-}
+GET  /health
+POST /exec            { command, pattern? }
+POST /dev/start
+POST /dev/stop
+POST /dev/restart
+POST /obs/test        { pattern? }
+POST /obs/check
+POST /obs/logs
 ```
 
-### Responses
+### Exec Request/Response
 
 ```json
+// Request
+{ "command": "test", "pattern": "auth" }
+
 // Success
-{
-  "status": "ok",
-  "output": "test output...",
-  "exit_code": 0
-}
+{ "status": "ok", "output": "...", "exit_code": 0 }
 
 // Error
-{
-  "status": "error",
-  "error": "command failed",
-  "exit_code": 1
-}
-```
-
-### Implementation
-
-```rust
-// Simple Axum or Actix server on localhost:8081
-async fn exec_handler(Json(payload): Json<ExecRequest>) -> Json<ExecResponse> {
-    let cmd = match payload.command.as_str() {
-        "start" => "npm run dev",
-        "stop" => "npm run stop",   // or pkill
-        "restart" => "npm run restart",
-        "test" => match payload.pattern {
-            Some(p) => format!("npm test -- {p}"),
-            None => "npm test",
-        },
-        "check" => "npm run check",  // lint + types
-        "logs" => "npm run logs",     // or docker logs
-        _ => return Json(ExecResponse::error("unknown command")),
-    };
-    
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        .output();
-    
-    // ...
-}
+{ "status": "error", "error": "command failed", "exit_code": 1 }
 ```
 
 ## Volume Mounts
 
-| Container | Host Path | Container Path | Options |
-|-----------|-----------|----------------|---------|
-| hive-server | `.hive/` | `/data` | rw |
-| app-container | `.` | `/app` | Delegated |
-| app-container | `.hive/` | `/app/.hive` | ro (overlay hide) |
-| hive-agent | `.` | `/app` | Delegated |
-| hive-agent | `.hive/` | `/app/.hive` | ro (overlay hide) |
+| Container     | Host Path | Container Path | Options    |
+|---------------|-----------|----------------|------------|
+| hive-server   | `.hive/`  | `/data`        | rw         |
+| app-container | `.`       | `/app`         | rw         |
+| app-container | `.hive/`  | `/app/.hive`   | ro         |
+| hive-agent    | `.`       | `/app`         | rw         |
+| hive-agent    | `.hive/`  | `/app/.hive`   | ro         |
+
+**Key insight**: Mounting `.hive/` as `ro` inside agent/app containers hides it from agents while
+keeping it accessible to hive-cli on the host.
+
+## `hive init` Command
+
+`hive init` prepares a project for use with The Hive:
+
+1. Creates `.hive/` directory
+2. Generates a project ID (e.g., `my-project-a3f2`)
+3. Writes Dockerfiles from embedded templates
+4. Runs interactive config wizard if no `config.toml` exists
+5. Writes `.hive/config.toml`
+6. Appends `.hive/hive.db` to `.gitignore` (keeps Dockerfiles + config in git)
+
+```
+$ hive init
+Initializing Hive in /home/dan/my-project/.hive/
+
+? How many agents? (2)
+? Agent 1: kilo or claude? kilo
+? Agent 1 tags? backend
+? Agent 2: kilo or claude? claude
+? Agent 2 tags? frontend
+? Start command? npm run dev
+? Test command? npm test
+? Check command? npm run check
+
+Created .hive/config.toml
+Created .hive/Dockerfile.server
+Created .hive/Dockerfile.agent
+Created .hive/Dockerfile.app
+
+Run 'hive start' to build images and start the hive.
+```
+
+## `hive start` Flow
 
 ```mermaid
-flowchart LR
-    subgraph Host["Host Filesystem"]
-        Proj["./ (project)"]
-        Hive[".hive/"]
-    end
-    
-    subgraph Agent["hive-agent"]
-        AppRW["/app (project)"]
-        AppRO["/app/.hive (hidden)"]
-    end
-    
-    Proj -->|Delegated| AppRW
-    Hive -->|ro| AppRO
-    
-    style AppRW fill:#dfd
-    style AppRO fill:#fdd
+flowchart TD
+    A[hive start] --> B{.hive/config.toml exists?}
+    B -->|No| C[hive init]
+    C --> D
+    B -->|Yes| D[Read config]
+    D --> E{Images built?}
+    E -->|No| F[docker build from .hive/Dockerfiles]
+    F --> G
+    E -->|Yes| G[Ensure hive-net-{id} exists]
+    G --> H[Create + start hive-server]
+    H --> I[Wait healthy]
+    I --> J[Create + start app-container]
+    J --> K[Create + start hive-agent x N]
+    K --> L[Connected!]
 ```
 
-**Key insight**: Mounting `.hive/` as `ro` inside agent/app containers hides it from the agents while keeping it accessible to hive-cli on the host.
+## `hive rebuild` Command
 
-## Build Commands
+Rebuilds images when Dockerfiles change:
 
 ```bash
-# Build all
-docker build -t hive-server:latest -f Dockerfile.hive-server ./hive-server
-docker build -t hive-agent:latest -f Dockerfile.hive-agent ./hive-agent
-docker build -t app-container:latest -f Dockerfile.app-container ./app-container
-
-# Or use docker-compose
-docker-compose build
-docker-compose up -d
+hive rebuild           # rebuild all images
+hive rebuild agent     # rebuild just the agent image
 ```
 
-## Docker Compose (Optional)
+## Development (hive contributors only)
 
-```yaml
-# docker-compose.yml
-version: '3.8'
+The `docker/` directory contains Dockerfiles for building from the hive-repo source tree.
+These are used by `just docker-build` and `just docker-up` when developing hive itself.
 
-services:
-  hive-server:
-    build: ./hive-server
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./.hive:/data
-    networks:
-      - hive-net
-
-  app-container:
-    build: ./app-container
-    ports:
-      - "3000:3000"
-    volumes:
-      - .:/app:Delegated
-      - ./.hive:/app/.hive:ro
-    networks:
-      - hive-net
-
-  hive-agent-0:
-    build: ./hive-agent
-    volumes:
-      - .:/app:Delegated
-      - ./.hive:/app/.hive:ro
-    environment:
-      - HIVE_AGENT_ID=agent-0
-      - HIVE_SERVER_URL=ws://hive-server:8080
-      - HIVE_APP_DAEMON_URL=http://app-container:8081
-      - CODING_AGENT=kilo
-      - AGENT_TAGS=backend
-    networks:
-      - hive-net
-
-networks:
-  hive-net:
-    driver: bridge
-```
-
-**Note**: We may not use docker-compose long-term since hive-cli manages containers directly, but it's useful for development/testing.
-
-## Security Considerations
-
-### Filesystem Isolation
+They are **not** used by end users.
 
 ```bash
-# Additional restrictions (optional)
---read-only=true  # Make container filesystem read-only
-# Then mount /app as tmpfs with write access
---tmpfs /app:rw,exec
-```
-
-### Network Isolation
-
-```mermaid
-flowchart TB
-    subgraph Allowed["Allowed"]
-        S[hive-server]
-        App[app-container]
-        Local[localhost]
-    end
-    
-    subgraph Blocked["Blocked (default)"]
-        Internet[Internet]
-    end
-    
-    Agent --> S
-    Agent --> App
-    Agent --> Local
-    Agent -.->|iptables| Internet
-```
-
-```bash
-# Block outbound except specific targets
-# (Requires Docker with iptables integration)
-```
-
-### Resource Limits
-
-```bash
-# Limit memory and CPU
---memory=2g
---cpus=2
+just docker-build   # build dev images from source
+just docker-up      # start with docker-compose (dev only)
 ```
 
 ---
@@ -456,16 +402,8 @@ flowchart TB
 
 - [Overview](./00-overview.md) - Problem statement
 - [Architecture](./01-architecture.md) - System overview
-- [hive-cli](./02-hive-cli.md) - Container management
+- [hive-cli](./02-hive-cli.md) - Container management commands
 - [Configuration](./06-configuration.md) - Config format
-
-### Deep Links
-
-- [Container specs](./05-docker.md#container-hive-server) - hive-server container
-- [hive-agent container](./05-docker.md#container-hive-agent) - Agent container setup
-- [app-container](./05-docker.md#container-app-container) - Shared dev environment
-- [app-daemon API](./05-docker.md#app-daemon) - HTTP API for dev commands
-- [Volume mounts](./05-docker.md#volume-mounts) - How directories are mapped
 
 ### See Also
 

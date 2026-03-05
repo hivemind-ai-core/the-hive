@@ -45,18 +45,13 @@ Created on first `hive start` in a project directory.
 host = "hive-server"  # Container name in Docker network
 port = 8080
 
-[agents]
-count = 2
-default_tags = []
-
-# Per-agent configuration
-[agent.0]
+[[agents]]
+name = "kilo-1"
 coding_agent = "kilo"
 tags = ["backend"]
-# Optional: custom name
-# name = "backend-agent"
 
-[agent.1]
+[[agents]]
+name = "claude-1"
 coding_agent = "claude"
 tags = ["frontend"]
 
@@ -93,9 +88,10 @@ level = "info"
 host = "hive-server"
 port = 8080
 
-[agents]
-count = 1
-default_tags = []
+[[agents]]
+name = "kilo-1"
+coding_agent = "kilo"
+tags = []
 
 [app]
 dev_port = 3000
@@ -396,9 +392,9 @@ flowchart TD
     B -->|Yes| E[Continue]
     
     subgraph Rules["Validation Rules"]
-        R1[agents.count > 0]
-        R2[agents.count <= 10]
-        R3[agent[N].coding_agent in [kilo, claude]]
+        R1[agents len >= 1]
+        R2[agents len <= 10]
+        R3[agent.coding_agent in [kilo, claude]]
         R4[app.*_command non-empty]
         R5[port 1-65535]
     end
@@ -410,8 +406,9 @@ flowchart TD
     A -.-> R5
 ```
 
-- `agents.count` > 0 and <= 10
-- `agent[N].coding_agent` in ["kilo", "claude"]
+- `agents` list has 1-10 entries
+- Each `agent.name` is non-empty
+- Each `agent.coding_agent` in ["kilo", "claude"]
 - All app commands non-empty strings
 - Port numbers valid (1-65535)
 

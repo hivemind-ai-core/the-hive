@@ -30,3 +30,7 @@ Thumbs.db
 
 # Temporary files
 *.tmp
+mcp.json
+.mcp.json
+.hive/hive.db
+.hive/bin/

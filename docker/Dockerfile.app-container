@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.75-slim AS builder
+FROM rust:1.93-slim AS builder
 
 WORKDIR /build
 
@@ -11,8 +11,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copy workspace
 COPY Cargo.toml Cargo.lock ./
-COPY crates/hive-core ./crates/hive-core/
-COPY crates/app-daemon ./crates/app-daemon/
+COPY crates/ ./crates/
 
 # Build
 RUN cargo build --release -p app-daemon
@@ -21,31 +20,13 @@ RUN cargo build --release -p app-daemon
 FROM debian:bookworm-slim
 
 # Install base tools
+# NOTE: This is the dev/test image. The full user image (with Node, Python, Go, etc.)
+# is written to .hive/Dockerfile.app by 'hive init'.
 RUN apt-get update && apt-get install -y \
     curl \
     git \
-    build-essential \
     ca-certificates \
     libssl3 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && npm install -g pnpm bun \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Install Python + pytest
-RUN apt-get update && apt-get install -y python3 python3-pip \
-    && pip3 install pytest \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Go (for Go projects)
-RUN apt-get update && apt-get install -y golang-go \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy app-daemon binary

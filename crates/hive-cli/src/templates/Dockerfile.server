@@ -1,0 +1,26 @@
+# hive-server container
+# This file is managed by 'hive' but is safe to edit.
+# Run 'hive rebuild server' after making changes.
+# The binary at .hive/bin/hive-server was placed there by 'hive init'.
+
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY .hive/bin/hive-server /usr/local/bin/
+
+RUN useradd -m hive
+USER hive
+WORKDIR /data
+
+ENV RUST_LOG=info
+ENV HIVE_SERVER_PORT=8080
+ENV HIVE_DB_PATH=/data/hive.db
+
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:${HIVE_SERVER_PORT}/health || exit 1
+
+CMD ["hive-server"]

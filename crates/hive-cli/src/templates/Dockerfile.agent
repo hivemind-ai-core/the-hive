@@ -1,0 +1,44 @@
+# hive-agent container
+# This file is managed by 'hive' but is safe to edit.
+# Run 'hive rebuild agent' after making changes.
+# Common customizations: add project-specific tools, change Node/Python versions.
+# The binary at .hive/bin/hive-agent was placed there by 'hive init'.
+
+FROM ubuntu:24.04
+
+# Base tools available to coding agents
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    findutils \
+    grep \
+    sed \
+    gawk \
+    jq \
+    fzf \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js + package managers
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g pnpm bun \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust toolchain (for Rust projects)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Kilo Code
+RUN npm install -g @kilocode/cli
+
+# Claude Code
+RUN npm install -g @anthropic-ai/claude-code
+
+COPY .hive/bin/hive-agent /usr/local/bin/
+
+RUN useradd -m agent
+USER agent
+WORKDIR /app
+
+CMD ["hive-agent"]

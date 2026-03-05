@@ -66,9 +66,26 @@ clean:
 dist-clean:
     rm -rf target
 
-# Install hive CLI locally
+# Build release binaries and install to ~/.hive/
 install:
-    cargo install --path crates/hive-cli
+    #!/usr/bin/env sh
+    set -eu
+    cargo build --release --workspace
+    DEST="${HIVE_HOME:-$HOME/.hive}"
+    mkdir -p "$DEST/bin" "$DEST/docker"
+    cp target/release/hive        "$DEST/bin/"
+    cp target/release/hive-server "$DEST/bin/"
+    cp target/release/hive-agent  "$DEST/bin/"
+    cp target/release/app-daemon  "$DEST/bin/"
+    chmod +x "$DEST/bin/"*
+    cp crates/hive-cli/src/templates/Dockerfile.server "$DEST/docker/"
+    cp crates/hive-cli/src/templates/Dockerfile.agent  "$DEST/docker/"
+    cp crates/hive-cli/src/templates/Dockerfile.app    "$DEST/docker/"
+    ./target/release/hive --version | awk '{print $2}' > "$DEST/version"
+    echo "Installed to $DEST"
+
+# Rebuild and reinstall (alias for install)
+reinstall: install
 
 # Generate shell completions
 completions shell="bash":

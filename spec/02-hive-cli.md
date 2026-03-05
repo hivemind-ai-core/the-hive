@@ -19,9 +19,11 @@ hive [--version] [--help] <command> [options]
 
 | Command | Alias | Description |
 |---------|-------|-------------|
-| `start` | `up` | Start all containers (hive-server, app-container, hive-agent[N]) |
+| `init`  | | Initialize hive in the current project (write Dockerfiles + config to `.hive/`) |
+| `start` | `up` | Build images if needed, then start all containers |
 | `stop` | `down` | Stop all containers |
 | `restart` | | Restart all containers |
+| `rebuild` | | Rebuild Docker images from `.hive/Dockerfiles` |
 | `ui` | `tui` | Start the TUI (connects to hive-server) |
 | `connect` | `attach` | Alias for `ui` |
 | `status` | | Show container status |
@@ -60,60 +62,60 @@ the-hive/
 
 ## Initialization Flow
 
-```mermaid
-flowchart TD
-    A[hive start] --> B{Config exists?}
-    
-    B -->|No| C[Prompt user for config]
-    C --> D[How many agents?]
-    D --> E[Agent 1: kilo/claude?]
-    E --> F[Agent 1 tags?]
-    F --> G[Agent 2: kilo/claude?]
-    G --> H[Agent 2 tags?]
-    H --> I[Start command?]
-    I --> J[Test command?]
-    J --> K[Check command?]
-    K --> L[Write config.toml]
-    
-    B -->|Yes| M[Read config.toml]
-    L --> M
-    
-    M --> N[Create .hive directory]
-    N --> O[Start hive-server]
-    O --> P[Start app-container]
-    P --> Q[Start hive-agent N]
-    Q --> R[Wait for healthy]
-    R --> S[Connected!]
-```
+### `hive init`
 
-### First-Run Interaction
+Sets up `.hive/` in the current project directory:
+
+1. Creates `.hive/`
+2. Generates a project ID (e.g. `my-project-a3f2`)
+3. Writes Dockerfiles from templates embedded in the CLI binary
+4. Runs interactive config wizard
+5. Writes `.hive/config.toml`
+6. Appends `.hive/hive.db` to `.gitignore`
 
 ```
-$ cd my-project
-$ hive start
+$ cd ~/my-project
+$ hive init
 
-Initializing Hive in my-project/.hive/
+Initializing Hive in /home/dan/my-project/.hive/
+
 ? How many agents? (2)
-? Agent 1: kilo or claude? [kilo/claude] kilo
+? Agent 1: kilo or claude? kilo
 ? Agent 1 tags? (comma separated) backend
-? Agent 2: kilo or claude? [kilo/claude] claude
+? Agent 2: kilo or claude? claude
 ? Agent 2 tags? (comma separated) frontend
 ? Start command for dev server? npm run dev
 ? Test command? npm test
 ? Check command? npm run check
 
 Created .hive/config.toml
-Starting containers...
-✓ hive-server
-✓ app-container
-✓ hive-agent-0
-✓ hive-agent-1
-✓ Connected to hive-server
+Created .hive/Dockerfile.server
+Created .hive/Dockerfile.agent
+Created .hive/Dockerfile.app
 
-Run 'hive ui' to open the TUI
+Run 'hive start' to build images and launch the hive.
 ```
 
-**First-run detection:** Check for `.hive/config.toml`. If missing, prompt for config.
+### `hive start`
+
+```mermaid
+flowchart TD
+    A[hive start] --> B{.hive/config.toml exists?}
+    B -->|No| C[Run hive init]
+    C --> D
+    B -->|Yes| D[Read config]
+    D --> E{Images built?}
+    E -->|No| F[docker build from .hive/Dockerfiles]
+    F --> G
+    E -->|Yes| G[Ensure hive-net-id exists]
+    G --> H[Create + start hive-server]
+    H --> I[Wait healthy]
+    I --> J[Create + start app-container]
+    J --> K[Create + start hive-agent x N]
+    K --> L[Connected!]
+```
+
+**First-run detection:** Check for `.hive/config.toml`. If missing, run `hive init` first.
 
 ## Docker Management
 
@@ -260,7 +262,7 @@ flowchart LR
 
 ### Config File Location
 
-- Default: `.hive/config.toml` (relative to project)
+- Default: `.hive/config.toml` (relative to project root)
 - Override: `--config /path/to/config.toml`
 
 ### Config Schema
