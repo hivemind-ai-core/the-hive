@@ -40,12 +40,36 @@ async fn main() -> anyhow::Result<()> {
     info!("  App Daemon URL: {}", app_daemon_url);
     info!("  Coding Agent: {}", coding_agent);
 
-    let (cmd_tx, pending, _push_rx) = client::start(server_url, agent_id.clone(), agent_name, agent_tags.clone());
+    let (cmd_tx, pending, mut push_rx) = client::start(server_url, agent_id.clone(), agent_name, agent_tags.clone());
+
+    // Heartbeat: update last_seen_at every 30 seconds.
+    {
+        let hb_tx = cmd_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                let msg = client::request("agent.heartbeat", None);
+                if hb_tx.send(client::ClientCmd::Send(msg)).is_err() {
+                    break;
+                }
+                tracing::debug!("heartbeat sent");
+            }
+        });
+    }
 
     start_mcp_server(&agent_id, &app_daemon_url, cmd_tx.clone(), pending.clone());
 
     let agent = Agent::new(agent_id, agent_tags, coding_agent, cmd_tx.clone(), pending);
     agent.spawn_polling();
+
+    // Log incoming push messages so they're visible in `hive logs`.
+    tokio::spawn(async move {
+        while let Some(msg) = push_rx.recv().await {
+            if let Some(params) = msg.params {
+                info!("Push message received: {params}");
+            }
+        }
+    });
 
     tokio::signal::ctrl_c().await?;
     let _ = cmd_tx.send(client::ClientCmd::Shutdown);

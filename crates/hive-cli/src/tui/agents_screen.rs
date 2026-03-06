@@ -1,5 +1,6 @@
 //! Agents screen: shows connected agents and their details.
 
+use chrono::Utc;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -10,6 +11,10 @@ use ratatui::{
 
 use super::state::AppState;
 use hive_core::types::Agent;
+
+fn staleness_secs(a: &Agent) -> Option<i64> {
+    a.last_seen_at.map(|t| (Utc::now() - t).num_seconds())
+}
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     if state.agents.is_empty() {
@@ -29,7 +34,24 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let items: Vec<ListItem> = state
         .agents
         .iter()
-        .map(|a| ListItem::new(Line::from(vec![Span::raw(&a.name)])))
+        .map(|a| {
+            let (label, style) = match staleness_secs(a) {
+                None | Some(i64::MIN..=-1) => (
+                    format!("{} (stale)", a.name),
+                    Style::default().fg(Color::Red),
+                ),
+                Some(secs) if secs > 300 => (
+                    format!("{} (stale)", a.name),
+                    Style::default().fg(Color::Red),
+                ),
+                Some(secs) if secs > 60 => (
+                    a.name.clone(),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+                ),
+                _ => (a.name.clone(), Style::default()),
+            };
+            ListItem::new(Line::from(vec![Span::styled(label, style)]))
+        })
         .collect();
 
     let selected = state.selected_agent_idx.min(state.agents.len().saturating_sub(1));
@@ -37,7 +59,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     list_state.select(Some(selected));
 
     f.render_stateful_widget(
-        List::new(items).block(Block::default().title("Agents").borders(Borders::ALL)),
+        List::new(items)
+            .block(Block::default().title("Agents").borders(Borders::ALL))
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED)),
         chunks[0],
         &mut list_state,
     );
@@ -55,10 +79,21 @@ fn render_detail(f: &mut Frame, area: Rect, agent: Option<&Agent>) {
             } else {
                 a.tags.join(", ")
             };
-            let last_seen = a
-                .last_seen_at
-                .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-                .unwrap_or_else(|| "-".to_string());
+            let (last_seen, seen_style) = match staleness_secs(a) {
+                None => ("-".to_string(), Style::default().fg(Color::Red)),
+                Some(secs) if secs > 300 => (
+                    format!("{}s ago (stale)", secs),
+                    Style::default().fg(Color::Red),
+                ),
+                Some(secs) if secs > 60 => (
+                    format!("{}s ago", secs),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Some(secs) => (
+                    format!("{}s ago", secs),
+                    Style::default().fg(Color::Green),
+                ),
+            };
             let lines = vec![
                 Line::from(vec![
                     Span::styled("ID: ", Style::default().add_modifier(Modifier::BOLD)),
@@ -74,7 +109,7 @@ fn render_detail(f: &mut Frame, area: Rect, agent: Option<&Agent>) {
                 ]),
                 Line::from(vec![
                     Span::styled("Last seen: ", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::raw(last_seen),
+                    Span::styled(last_seen, seen_style),
                 ]),
             ];
             f.render_widget(Paragraph::new(lines).block(block), area);

@@ -128,8 +128,12 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
         "topic.get"     => handle(&msg.id, handlers::message_board::get(&state.db, msg.params)),
         "topic.comment" => handle(&msg.id, handlers::message_board::comment(&state.db, msg.params)),
         "topic.wait"    => handle(&msg.id, handlers::message_board::wait(&state.db, msg.params).await),
-        "agent.register" => handle(&msg.id, handlers::agents::register(&state.db, msg.params)),
-        "agent.list"     => handle(&msg.id, handlers::agents::list(&state.db)),
+        "agent.register"  => handle(&msg.id, handlers::agents::register(&state.db, msg.params)),
+        "agent.list"      => handle(&msg.id, handlers::agents::list(&state.db)),
+        "agent.heartbeat" => handle(&msg.id,
+            communication::touch_agent(&state.db, agent_id)
+                .map(|_| serde_json::json!({ "ok": true }))
+        ),
         "push.send" => handle(
             &msg.id,
             handlers::push::send(&state.db, &state.clients, agent_id, msg.params),

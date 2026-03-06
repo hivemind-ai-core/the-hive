@@ -1,0 +1,18 @@
+[package]
+name = "hive-acceptance"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "hive_acceptance"
+path = "src/lib.rs"
+
+[dependencies]
+hive-server = { path = "../hive-server" }
+hive-core = { path = "../hive-core" }
+futures-util = "0.3"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.28"
+uuid = { version = "1", features = ["v4"] }

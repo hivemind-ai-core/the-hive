@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use hive_core::types::{PushMessage, Task};
 use tokio::process::Command;
-use tracing::{info, warn};
+use tracing::{debug, info, trace, warn};
 
 pub struct ExecutionResult {
     pub exit_code: i32,
@@ -36,21 +36,16 @@ pub fn build_prompt(task: &Task, messages: &[PushMessage]) -> String {
 
 /// Write the MCP server config files so the coding agent subprocess can discover the hive tools.
 ///
-/// Writes `.mcp.json` for Claude Code and `.kilocode/mcp.json` for Kilo, both pointing at
-/// the hive TCP MCP server on 127.0.0.1:mcp_port.
+/// Claude Code and Kilo support Streamable HTTP MCP transport via a `url` entry.
+/// We point them directly at the hive-agent's HTTP MCP server — no bridge needed.
 fn write_mcp_configs(mcp_port: u16) {
-    let config = serde_json::json!({
-        "mcpServers": {
-            "hive": {
-                "transport": "tcp",
-                "host": "127.0.0.1",
-                "port": mcp_port
-            }
-        }
+    let url_entry = serde_json::json!({
+        "url": format!("http://127.0.0.1:{mcp_port}/mcp")
     });
-    let content = serde_json::to_string_pretty(&config).unwrap_or_default();
 
     // Claude Code: .mcp.json in project root
+    let claude_cfg = serde_json::json!({ "mcpServers": { "hive": url_entry } });
+    let content = serde_json::to_string_pretty(&claude_cfg).unwrap_or_default();
     if let Err(e) = std::fs::write(".mcp.json", &content) {
         warn!("Failed to write .mcp.json: {e}");
     }
@@ -70,16 +65,39 @@ fn write_mcp_configs(mcp_port: u16) {
         .unwrap_or_else(|| serde_json::json!({ "mcpServers": {} }));
 
     if let Some(servers) = kilo_cfg.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-        servers.insert("hive".to_string(), serde_json::json!({
-            "transport": "tcp",
-            "host": "127.0.0.1",
-            "port": mcp_port
-        }));
+        servers.insert("hive".to_string(), url_entry);
     }
     let kilo_content = serde_json::to_string_pretty(&kilo_cfg).unwrap_or_default();
     if let Err(e) = std::fs::write(&kilo_path, kilo_content) {
         warn!("Failed to write .kilocode/mcp.json: {e}");
     }
+}
+
+/// Execute the coding agent with only push messages (no task context).
+///
+/// Used when an agent is idle and receives push messages from another agent or operator.
+pub async fn run_push_only(
+    agent_bin: &str,
+    agent_id: &str,
+    messages: &[PushMessage],
+) -> Result<ExecutionResult> {
+    use hive_core::types::TaskStatus;
+
+    let task = Task {
+        id: "push-only".to_string(),
+        title: "Respond to incoming messages".to_string(),
+        description: Some(
+            "You have received direct messages while idle. Respond or take action as appropriate.".to_string()
+        ),
+        status: TaskStatus::InProgress,
+        assigned_agent_id: Some(agent_id.to_string()),
+        tags: vec![],
+        result: None,
+        position: 0,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    run(&task, agent_bin, agent_id, messages).await
 }
 
 /// Execute the coding agent with the given task and any pending push messages.
@@ -131,27 +149,63 @@ pub async fn run(
         }
     }
 
-    let output = cmd
-        .output()
-        .await
-        .with_context(|| format!("spawning '{agent_bin}'"))?;
+    // Log the command being run (no prompt text at INFO to avoid log flooding).
+    let cmd_args: Vec<&str> = match agent_bin {
+        "claude" => {
+            let mut args = vec!["--dangerously-skip-permissions"];
+            if session_id.is_some() { args.extend(["-r", "<session>"]); }
+            args.push("-p"); args.push("<prompt>");
+            args
+        }
+        "kilo" => {
+            let mut args = vec!["run", "--auto"];
+            if session_id.is_some() { args.extend(["-c", "-s", "<session>"]); }
+            args.push("<prompt>");
+            args
+        }
+        _ => vec!["<prompt>"],
+    };
+    info!("Running: {agent_bin} {}", cmd_args.join(" "));
+    let preview = &prompt[..prompt.len().min(200)];
+    debug!("Prompt preview: {preview}");
+    trace!("Full prompt: {prompt}");
 
-    let exit_code = output.status.code().unwrap_or(-1);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = if stderr.is_empty() {
-        stdout.into_owned()
-    } else {
-        format!("{stdout}{stderr}")
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+    cmd.kill_on_drop(true);
+
+    let (exit_code, combined) = match tokio::time::timeout(TIMEOUT, cmd.output()).await {
+        Ok(Ok(output)) => {
+            let exit_code = output.status.code().unwrap_or(-1);
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            let combined = if stderr.is_empty() { stdout.clone() } else { format!("{stdout}{stderr}") };
+            if exit_code == 0 {
+                info!("'{agent_bin}' finished successfully");
+            } else {
+                warn!("'{agent_bin}' finished with exit code {exit_code}");
+                if !stderr.is_empty() { warn!("stderr: {}", stderr.trim()); }
+                if !stdout.is_empty() { warn!("stdout: {}", stdout.trim()); }
+            }
+            (exit_code, combined)
+        }
+        Ok(Err(e)) => {
+            return Err(e).with_context(|| format!("spawning '{agent_bin}'"));
+        }
+        Err(_) => {
+            warn!("'{agent_bin}' timed out after 10m for task {} — killing", task.id);
+            (-1, "timed out after 10m".to_string())
+        }
     };
 
-    info!("'{agent_bin}' finished with exit code {exit_code}");
-
     // Persist session ID for next run.
-    if let Some(session_id) = crate::session::extract_from_output(&combined) {
-        if let Err(e) = crate::session::save(agent_id, &session_id) {
-            warn!("Failed to save session for agent '{agent_id}': {e}");
+    match crate::session::extract_from_output(&combined) {
+        Some(session_id) => {
+            debug!("Extracted session id: {session_id}");
+            if let Err(e) = crate::session::save(agent_id, &session_id) {
+                warn!("Failed to save session for agent '{agent_id}': {e}");
+            }
         }
+        None => debug!("No session id found in output (context will not be resumed)"),
     }
 
     Ok(ExecutionResult {

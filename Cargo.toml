@@ -6,4 +6,5 @@ members = [
     "crates/hive-server",
     "crates/hive-agent",
     "crates/app-daemon",
+    "crates/hive-acceptance",
 ]

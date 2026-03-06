@@ -11,6 +11,7 @@ pub struct TaskSummary {
     pub assigned: Option<String>,
     pub description: Option<String>,
     pub tags: Vec<String>,
+    pub result: Option<String>,
 }
 
 impl From<&Task> for TaskSummary {
@@ -22,6 +23,7 @@ impl From<&Task> for TaskSummary {
             assigned: t.assigned_agent_id.clone(),
             description: t.description.clone(),
             tags: t.tags.clone(),
+            result: t.result.clone(),
         }
     }
 }
@@ -40,6 +42,7 @@ pub struct AppState {
     pub agents: Vec<Agent>,
     pub tasks: Vec<TaskSummary>,
     pub selected_task_idx: usize,
+    pub task_detail_scroll: u16,
     pub topics: Vec<TopicSummary>,
     pub selected_topic_idx: usize,
     pub selected_agent_idx: usize,

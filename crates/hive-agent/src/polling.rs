@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use hive_core::types::{ApiMessage, MessageType, Task};
+use hive_core::types::{ApiMessage, MessageType, PushMessage, Task};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -21,6 +21,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 pub async fn run(
     agent_id: String,
     agent_tags: Vec<String>,
+    coding_agent: String,
     cmd_tx: UnboundedSender<ClientCmd>,
     pending: PendingRequests,
     mut on_task: impl FnMut(Task) + Send,
@@ -48,8 +49,16 @@ pub async fn run(
                 backoff = (backoff * 2).min(BACKOFF_MAX);
             }
             Some(msg) if msg.result.as_ref().map(|v| v.is_null()).unwrap_or(false) => {
-                // No task available — use a fixed interval, not exponential backoff.
+                // No task available — check for unread push messages and execute if present.
+                tracing::debug!("No task available, polling again in {POLL_INTERVAL:?}");
+                handle_idle_push_messages(&agent_id, &coding_agent, &cmd_tx, &pending).await;
                 tokio::time::sleep(POLL_INTERVAL).await;
+            }
+            Some(msg) if msg.error.is_some() => {
+                let err = msg.error.as_ref().unwrap();
+                warn!("task.get_next error {}: {}", err.code, err.message);
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(BACKOFF_MAX);
             }
             Some(msg) => {
                 if let Some(result) = msg.result {
@@ -64,6 +73,56 @@ pub async fn run(
                 }
             }
         }
+    }
+}
+
+/// When idle (no task), fetch unread push messages. If any, run the coding agent
+/// to handle them, then acknowledge them. If none, do nothing.
+async fn handle_idle_push_messages(
+    agent_id: &str,
+    coding_agent: &str,
+    cmd_tx: &UnboundedSender<ClientCmd>,
+    pending: &PendingRequests,
+) {
+    let req = ApiMessage {
+        msg_type: MessageType::Request,
+        id: Uuid::new_v4().to_string(),
+        method: Some("push.list".to_string()),
+        params: Some(serde_json::json!({})),
+        result: None,
+        error: None,
+    };
+
+    let messages: Vec<PushMessage> = match send_request(cmd_tx, pending, req).await {
+        Some(resp) => resp.result
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default(),
+        None => return,
+    };
+
+    if messages.is_empty() {
+        return;
+    }
+
+    for m in &messages {
+        let from = m.from_agent_id.as_deref().unwrap_or("unknown");
+        info!("Unread push from {from}: {}", m.content);
+    }
+
+    let message_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
+
+    match crate::executor::run_push_only(coding_agent, agent_id, &messages).await {
+        Ok(r) => info!("Push-only execution finished (exit {})", r.exit_code),
+        Err(e) => warn!("Push-only execution failed: {e}"),
+    }
+
+    // Acknowledge all messages regardless of execution result.
+    let ack_req = crate::client::request(
+        "push.ack",
+        Some(serde_json::json!({ "message_ids": message_ids })),
+    );
+    if let Err(e) = cmd_tx.send(crate::client::ClientCmd::Send(ack_req)) {
+        warn!("Failed to send push.ack: {e}");
     }
 }
 

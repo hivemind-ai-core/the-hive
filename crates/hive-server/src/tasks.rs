@@ -101,6 +101,18 @@ pub fn get_next(pool: &DbPool, agent_id: &str, tag: Option<&str>) -> Result<Opti
     Ok(None)
 }
 
+/// Reset all in-progress tasks assigned to `agent_id` back to pending.
+/// Returns the number of tasks reset.
+pub fn reset_in_progress_for_agent(pool: &DbPool, agent_id: &str) -> Result<usize> {
+    let conn = pool.get()?;
+    let count = conn.execute(
+        "UPDATE tasks SET status='pending', assigned_agent_id=NULL, updated_at=datetime('now')
+         WHERE status='in-progress' AND assigned_agent_id=?1",
+        rusqlite::params![agent_id],
+    ).context("resetting orphaned tasks")?;
+    Ok(count)
+}
+
 /// Mark a task done and optionally store a result string.
 pub fn complete(pool: &DbPool, task_id: &str, result: Option<String>) -> Result<Task> {
     {

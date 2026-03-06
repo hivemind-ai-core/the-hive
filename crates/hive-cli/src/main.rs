@@ -81,7 +81,7 @@ enum Commands {
     /// Manage agent authentication (Claude OAuth / API keys)
     Auth {
         #[command(subcommand)]
-        action: AuthAction,
+        action: Option<AuthAction>,
     },
 }
 
@@ -89,26 +89,36 @@ enum Commands {
 enum AuthAction {
     /// Show current auth configuration and detected credentials
     Status,
-    /// Write an API key to .hive/.env (e.g. ANTHROPIC_API_KEY)
+    /// Write an API key to .hive/.env or a specific agent's env block in config.toml
     SetKey {
         /// Variable name (e.g. ANTHROPIC_API_KEY)
         key: String,
         /// Key value
         value: String,
+        /// Write to a specific agent's env block instead of the shared .hive/.env
+        #[arg(long)]
+        agent: Option<String>,
     },
-    /// Write a base URL to .hive/.env for third-party providers (e.g. OPENAI_BASE_URL)
+    /// Write a base URL to .hive/.env or a specific agent's env block in config.toml
     SetEndpoint {
         /// Variable name (e.g. OPENAI_BASE_URL)
         key: String,
         /// Base URL (e.g. https://api.together.xyz/v1)
         url: String,
+        /// Write to a specific agent's env block instead of the shared .hive/.env
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// List all keys and endpoints in .hive/.env (values masked)
     List,
     /// Copy ~/.claude.json to .hive/claude.json for use in agent containers
     Sync,
-    /// Copy ~/.kilocode/ to .hive/kilocode/ for project-local kilo config
-    KiloSync,
+    /// Copy ~/.kilocode/ to .hive/kilocode[-{agent}]/ for project-local kilo config
+    KiloSync {
+        /// Sync for a specific agent only (writes to .hive/kilocode-{name}/)
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Run 'claude auth login' inside the agent container (for OAuth/subscription users)
     Login {
         /// Email address for the Claude account
@@ -150,7 +160,7 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 let path = config::io::default_path(&args.directory);
                 let existing = config::load(&path)?;
-                let updated = tui::config::run_wizard(existing)?;
+                let updated = tui::config::run_wizard(existing, args.directory.clone())?;
                 config::validate(&updated)?;
                 config::save(&updated, &path)?;
                 println!("Configuration saved to {}", path.display());
@@ -164,13 +174,29 @@ async fn main() -> anyhow::Result<()> {
         Commands::Install => updater::run(false).await?,
         Commands::Update { check } => updater::run(check).await?,
         Commands::Auth { action } => match action {
-            AuthAction::Status => commands::auth_status(&args.directory)?,
-            AuthAction::SetKey { key, value } => commands::auth_set_key(&args.directory, &key, &value)?,
-            AuthAction::SetEndpoint { key, url } => commands::auth_set_endpoint(&args.directory, &key, &url)?,
-            AuthAction::List => commands::auth_list(&args.directory)?,
-            AuthAction::Sync => commands::auth_sync(&args.directory)?,
-            AuthAction::KiloSync => commands::auth_kilo_sync(&args.directory)?,
-            AuthAction::Login { email } => commands::auth_login(&args.directory, email.as_deref()).await?,
+            None => {
+                println!("Hive Auth — manage agent credentials");
+                println!();
+                println!("For kilo agents:");
+                println!("  hive auth set-key ANTHROPIC_API_KEY sk-ant-...");
+                println!();
+                println!("For claude agents (choose one):");
+                println!("  hive auth set-key ANTHROPIC_API_KEY sk-ant-...   # API key");
+                println!("  hive auth sync                                    # copy ~/.claude.json");
+                println!("  hive auth login                                   # interactive login");
+                println!();
+                println!("Current status:");
+                commands::auth_status(&args.directory)?;
+                println!();
+                println!("Subcommands: set-key, set-endpoint, list, status, sync, kilo-sync, login");
+            }
+            Some(AuthAction::Status) => commands::auth_status(&args.directory)?,
+            Some(AuthAction::SetKey { key, value, agent }) => commands::auth_set_key(&args.directory, &key, &value, agent.as_deref())?,
+            Some(AuthAction::SetEndpoint { key, url, agent }) => commands::auth_set_endpoint(&args.directory, &key, &url, agent.as_deref())?,
+            Some(AuthAction::List) => commands::auth_list(&args.directory)?,
+            Some(AuthAction::Sync) => commands::auth_sync(&args.directory)?,
+            Some(AuthAction::KiloSync { agent }) => commands::auth_kilo_sync(&args.directory, agent.as_deref())?,
+            Some(AuthAction::Login { email }) => commands::auth_login(&args.directory, email.as_deref()).await?,
         },
     }
 

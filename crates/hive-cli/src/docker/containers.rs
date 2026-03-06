@@ -1,16 +1,18 @@
 //! Container creation helpers.
 
 use std::collections::HashMap;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use bollard::{
     Docker,
-    models::{ContainerCreateBody, HostConfig, PortBinding},
+    models::{ContainerCreateBody, HostConfig, NetworkConnectRequest, PortBinding},
+    query_parameters::ListContainersOptionsBuilder,
 };
 use tracing::info;
 
-use super::network::network_name;
+use super::network::{agent_network_name, network_name};
 use crate::config::{Agent, Config};
 
 /// Image name for hive-server, scoped to the project.
@@ -31,6 +33,41 @@ pub fn agent_name(id: &str, agent: &str) -> String {
         .map(|c| if c.is_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '-' })
         .collect();
     format!("hive-agent-{id}-{safe}")
+}
+
+/// List agent container names for `project_id` that are NOT in `known_names`.
+/// Used by `hive stop` to find orphaned containers from removed agents.
+pub async fn orphaned_agent_names(
+    docker: &Docker,
+    id: &str,
+    known_names: &[String],
+) -> Result<Vec<String>> {
+    let prefix = format!("hive-agent-{id}-");
+    let opts = ListContainersOptionsBuilder::default()
+        .all(true)
+        .build();
+    let containers = docker.list_containers(Some(opts)).await
+        .context("listing containers")?;
+
+    let orphans = containers
+        .into_iter()
+        .flat_map(|c| c.names.unwrap_or_default())
+        .map(|n| n.trim_start_matches('/').to_string())
+        .filter(|n| n.starts_with(&prefix) && !known_names.contains(n))
+        .collect();
+
+    Ok(orphans)
+}
+
+/// Connect an existing container to an additional network.
+pub async fn connect_to_network(docker: &Docker, container: &str, network: &str) -> Result<()> {
+    docker
+        .connect_network(network, NetworkConnectRequest {
+            container: container.to_string(),
+            ..Default::default()
+        })
+        .await
+        .with_context(|| format!("connecting '{container}' to network '{network}'"))
 }
 
 /// Check whether a Docker image exists locally.
@@ -54,15 +91,15 @@ pub async fn create_server(docker: &Docker, cfg: &Config, project_dir: &Path) ->
 
     let mut port_bindings = HashMap::new();
     port_bindings.insert(
-        container_port,
+        container_port.clone(),
         Some(vec![PortBinding {
             host_ip: Some("0.0.0.0".to_string()),
             host_port: Some(host_port),
         }]),
     );
-
     let body = ContainerCreateBody {
         image: Some(server_image(id)),
+        exposed_ports: Some(vec![container_port]),
         env: Some(vec![
             format!("HIVE_SERVER_PORT={}", cfg.server.port),
             format!("HIVE_DB_PATH={}", cfg.server.db_path),
@@ -108,15 +145,15 @@ pub async fn create_app(docker: &Docker, cfg: &Config, project_dir: &Path) -> Re
 
     let mut port_bindings = HashMap::new();
     port_bindings.insert(
-        daemon_container_port,
+        daemon_container_port.clone(),
         Some(vec![PortBinding {
             host_ip: Some("0.0.0.0".to_string()),
             host_port: Some(daemon_host_port),
         }]),
     );
-
     let body = ContainerCreateBody {
         image: Some(app_image(id)),
+        exposed_ports: Some(vec![daemon_container_port]),
         env: Some(vec![
             format!("HIVE_APP_DAEMON_PORT={}", cfg.app.daemon_port),
             format!("RUST_LOG={}", cfg.logging.level),
@@ -168,7 +205,7 @@ fn load_dotenv(path: &Path) -> HashMap<String, String> {
 pub async fn create_agents(docker: &Docker, cfg: &Config, project_dir: &Path) -> Result<Vec<String>> {
     let project_dir = project_dir.canonicalize().context("resolving project directory")?;
     let id = &cfg.project_id;
-    let net = network_name(id);
+    let net = agent_network_name(id);
     let hive_dir = project_dir.join(".hive");
     let project_dir_str = project_dir.display().to_string();
     let server_url = format!("ws://{}:{}/ws", server_name(id), cfg.server.port);
@@ -176,6 +213,11 @@ pub async fn create_agents(docker: &Docker, cfg: &Config, project_dir: &Path) ->
 
     // Load project-wide .hive/.env (missing file → empty map, silently).
     let dotenv = load_dotenv(&hive_dir.join(".env"));
+
+    // Detect host UID/GID from the project directory so the container user matches,
+    // ensuring bind-mount writes succeed without running as root.
+    let host_uid = project_dir.metadata().map(|m| m.uid()).unwrap_or(1000);
+    let host_gid = project_dir.metadata().map(|m| m.gid()).unwrap_or(1000);
 
     let mut ids = Vec::new();
 
@@ -187,14 +229,20 @@ pub async fn create_agents(docker: &Docker, cfg: &Config, project_dir: &Path) ->
         let mut merged_env = dotenv.clone();
         merged_env.extend(agent.env.clone());
 
-        let container_id = create_agent_container(
+        match create_agent_container(
             docker, id, &name, agent, &net, &server_url, &app_daemon_url,
             &project_dir_str, &hive_dir.display().to_string(), mcp_port,
-            &cfg.logging.level, &merged_env,
-        ).await?;
-
-        info!("Created container '{name}' ({container_id})");
-        ids.push(container_id);
+            &cfg.logging.level, &merged_env, host_uid, host_gid,
+        ).await {
+            Ok(container_id) => {
+                info!("Created container '{name}' ({container_id})");
+                ids.push(container_id);
+            }
+            Err(e) if format!("{e:#}").contains("already in use") => {
+                info!("Container '{name}' already exists");
+            }
+            Err(e) => return Err(e),
+        }
     }
 
     Ok(ids)
@@ -213,10 +261,16 @@ async fn create_agent_container(
     mcp_port: u16,
     log_level: &str,
     extra_env: &HashMap<String, String>,
+    host_uid: u32,
+    host_gid: u32,
 ) -> Result<String> {
     let mut binds = vec![
         format!("{project_dir}:/app"),
+        // Full .hive read-only so agents cannot modify shared config or other agents' files.
         format!("{hive_dir}:/app/.hive:ro"),
+        // Per-agent session directory mounted rw; more-specific bind shadows the ro parent.
+        format!("{hive_dir}/agents/{agent_name}:/app/.hive/agents/{agent_name}",
+            agent_name = agent.name),
     ];
 
     // Auto-mount credential directories for known coding agents.
@@ -233,21 +287,28 @@ async fn create_agent_container(
         }
     }
 
-    // Mount .hive/claude.json → /home/agent/.claude.json (OAuth/subscription credentials).
-    // Written by `hive auth sync` or `hive auth login`. Only mounted if present.
+    // Mount claude.json credentials → /home/agent/.claude.json.
+    // Prefers per-agent .hive/claude-{name}.json over shared .hive/claude.json.
+    // Written by `hive auth sync` or `hive auth login`.
     if agent.coding_agent == "claude" {
-        let claude_json = std::path::Path::new(hive_dir).join("claude.json");
+        let per_agent_claude = std::path::Path::new(hive_dir).join(format!("claude-{}.json", agent.name));
+        let shared_claude = std::path::Path::new(hive_dir).join("claude.json");
+        let claude_json = if per_agent_claude.exists() { &per_agent_claude } else { &shared_claude };
         if claude_json.exists() {
             binds.push(format!("{}:/home/agent/.claude.json:ro", claude_json.display()));
         }
     }
 
-    // Mount kilo config: prefer project-local .hive/kilocode/ over global ~/.kilocode/.
-    // `hive auth kilo-sync` populates .hive/kilocode/ from the host's ~/.kilocode/.
+    // Mount kilo config: prefer per-agent .hive/kilocode-{name}/, then project-local
+    // .hive/kilocode/, then global ~/.kilocode/. `hive auth kilo-sync [--agent NAME]`
+    // populates these directories.
     if agent.coding_agent == "kilo" {
+        let per_agent_kilo = std::path::Path::new(hive_dir).join(format!("kilocode-{}", agent.name));
         let local_kilo = std::path::Path::new(hive_dir).join("kilocode");
         let global_kilo = std::path::Path::new(&home).join(".kilocode");
-        if local_kilo.exists() {
+        if per_agent_kilo.exists() {
+            binds.push(format!("{}:/home/agent/.kilocode:ro", per_agent_kilo.display()));
+        } else if local_kilo.exists() {
             binds.push(format!("{}:/home/agent/.kilocode:ro", local_kilo.display()));
         } else if global_kilo.exists() {
             binds.push(format!("{}:/home/agent/.kilocode", global_kilo.display()));
@@ -271,10 +332,14 @@ async fn create_agent_container(
 
     let body = ContainerCreateBody {
         image: Some(agent_image(id)),
+        // Run as the host user so bind-mount writes succeed without root.
+        user: Some(format!("{host_uid}:{host_gid}")),
         env: Some(env),
         host_config: Some(HostConfig {
             network_mode: Some(net.to_string()),
             binds: Some(binds),
+            // Prevent any setuid binary inside the container from gaining root.
+            security_opt: Some(vec!["no-new-privileges:true".to_string()]),
             ..Default::default()
         }),
         ..Default::default()

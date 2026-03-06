@@ -6,7 +6,8 @@ use hive_core::types::Agent;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{communication as db_comm, db::DbPool};
+use crate::{communication as db_comm, db::DbPool, tasks as db_tasks};
+use tracing::info;
 
 #[derive(Deserialize)]
 struct RegisterParams {
@@ -36,6 +37,13 @@ pub fn register(pool: &DbPool, params: Option<Value>) -> Result<Value> {
         last_seen_at: Some(now),
     };
     db_comm::upsert_agent(pool, &agent)?;
+
+    // Reset any in-progress tasks assigned to this agent back to pending.
+    // If the agent is registering, it just (re)started — those tasks were orphaned.
+    let reset = db_tasks::reset_in_progress_for_agent(pool, &agent.id)?;
+    if reset > 0 {
+        info!("Agent '{}' reconnected: reset {} orphaned in-progress task(s) to pending", agent.id, reset);
+    }
 
     Ok(serde_json::json!({ "ok": true, "agent_id": agent.id }))
 }

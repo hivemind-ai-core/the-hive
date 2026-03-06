@@ -323,6 +323,26 @@ impl App {
                     }
                 }
             }
+            Action::Char('r') if self.screen == Screen::Tasks => {
+                if let Some(task) = self.state.tasks.get(self.state.selected_task_idx) {
+                    if let Some(ref tx) = self.cmd_tx {
+                        let _ = tx.send(TuiCmd::SetTaskStatus {
+                            id: task.id.clone(),
+                            status: "pending".to_string(),
+                        });
+                    }
+                }
+            }
+            Action::Char('x') if self.screen == Screen::Tasks => {
+                if let Some(task) = self.state.tasks.get(self.state.selected_task_idx) {
+                    if let Some(ref tx) = self.cmd_tx {
+                        let _ = tx.send(TuiCmd::SetTaskStatus {
+                            id: task.id.clone(),
+                            status: "cancelled".to_string(),
+                        });
+                    }
+                }
+            }
             Action::Char('e') if self.screen == Screen::Tasks => {
                 if let Some(task) = self.state.tasks.get(self.state.selected_task_idx) {
                     self.task_edit_dialog = Some(TaskEditDialog {
@@ -400,11 +420,18 @@ impl App {
                     });
                 }
             }
+            Action::Char('[') if self.screen == Screen::Tasks => {
+                self.state.task_detail_scroll = self.state.task_detail_scroll.saturating_sub(1);
+            }
+            Action::Char(']') if self.screen == Screen::Tasks => {
+                self.state.task_detail_scroll = self.state.task_detail_scroll.saturating_add(1);
+            }
             Action::Down => {
                 match self.screen {
                     Screen::Tasks => {
                         if self.state.selected_task_idx + 1 < self.state.tasks.len() {
                             self.state.selected_task_idx += 1;
+                            self.state.task_detail_scroll = 0;
                         }
                     }
                     Screen::MessageBoard => {
@@ -423,7 +450,11 @@ impl App {
             Action::Up => {
                 match self.screen {
                     Screen::Tasks => {
-                        self.state.selected_task_idx = self.state.selected_task_idx.saturating_sub(1);
+                        let prev = self.state.selected_task_idx;
+                        self.state.selected_task_idx = prev.saturating_sub(1);
+                        if self.state.selected_task_idx != prev {
+                            self.state.task_detail_scroll = 0;
+                        }
                     }
                     Screen::MessageBoard => {
                         self.state.selected_topic_idx = self.state.selected_topic_idx.saturating_sub(1);
@@ -584,7 +615,7 @@ pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<(
                 "Enter:send  Esc:cancel"
             } else {
                 match app.screen {
-                    Screen::Tasks => "n:new  e:edit  s:cycle status  ↑↓:select  q:quit",
+                    Screen::Tasks => "n:new  e:edit  s:cycle  r:reset  x:cancel  ↑↓:select  []:scroll  q:quit",
                     Screen::MessageBoard => "n:new topic  c:comment  q:quit",
                     Screen::Agents => "p:push message  q:quit",
                     Screen::Settings => "s:start  S:stop  r:restart  R:reset  q:quit",

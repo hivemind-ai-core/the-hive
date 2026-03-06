@@ -37,7 +37,9 @@ RUN npm install -g @anthropic-ai/claude-code
 
 COPY .hive/bin/hive-agent /usr/local/bin/
 
-RUN useradd -m agent
+# Create a non-root user. Runtime UID is overridden by hive to match the host user (see containers.rs).
+RUN useradd -m -s /bin/bash agent \
+    && mkdir -p /home/agent/.claude /home/agent/.kilocode
 USER agent
 WORKDIR /app
 

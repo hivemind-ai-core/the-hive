@@ -71,6 +71,10 @@ pub fn update(pool: &DbPool, params: Option<Value>) -> Result<Value> {
         let new_status = parse_status(status_str)?;
         validate_transition(task.status, new_status)?;
         task.status = new_status;
+        // Reset to pending also unassigns the task.
+        if new_status == hive_core::types::TaskStatus::Pending {
+            task.assigned_agent_id = None;
+        }
     }
 
     db_tasks::update_task(pool, &task)?;
@@ -158,7 +162,7 @@ fn validate_transition(
     use hive_core::types::TaskStatus::*;
     let allowed = match from {
         Pending     => &[InProgress, Cancelled, Blocked][..],
-        InProgress  => &[Done, Blocked, Cancelled][..],
+        InProgress  => &[Done, Blocked, Cancelled, Pending][..], // Pending = operator reset
         Blocked     => &[Pending, Cancelled][..],
         Done | Cancelled => &[][..],
     };

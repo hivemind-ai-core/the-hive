@@ -84,7 +84,7 @@ async fn run_loop(
                 let reg = request(
                     "agent.register",
                     Some(serde_json::json!({
-                        "agent_id": agent_id,
+                        "id": agent_id,
                         "name": agent_name,
                         "tags": agent_tags,
                     })),

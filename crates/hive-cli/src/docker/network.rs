@@ -10,17 +10,32 @@ use bollard::{
 };
 use tracing::info;
 
-/// Return the project-scoped network name.
+/// Return the project-scoped external network name (server + app-daemon, host-accessible).
 pub fn network_name(project_id: &str) -> String {
     format!("hive-net-{project_id}")
 }
 
-/// Ensure the project network exists; create it if not.
+/// Return the project-scoped agent network name (agents + server, optionally internal).
+pub fn agent_network_name(project_id: &str) -> String {
+    format!("hive-agents-{project_id}")
+}
+
+/// Ensure the external project network exists; create it if not.
+pub async fn ensure(docker: &Docker, project_id: &str) -> Result<()> {
+    let name = network_name(project_id);
+    if exists(docker, &name).await? {
+        info!("Network '{name}' already exists");
+        return Ok(());
+    }
+    create(docker, &name, false).await
+}
+
+/// Ensure the agent network exists; create it if not.
 ///
 /// If `internal` is true the network is created without an external route
 /// (agents cannot reach the internet). Existing networks are not modified.
-pub async fn ensure(docker: &Docker, project_id: &str, internal: bool) -> Result<()> {
-    let name = network_name(project_id);
+pub async fn ensure_agent_network(docker: &Docker, project_id: &str, internal: bool) -> Result<()> {
+    let name = agent_network_name(project_id);
     if exists(docker, &name).await? {
         info!("Network '{name}' already exists");
         return Ok(());
@@ -64,6 +79,12 @@ pub async fn create(docker: &Docker, name: &str, internal: bool) -> Result<()> {
         info!("Created network '{name}'");
     }
     Ok(())
+}
+
+/// Remove both project networks (best-effort; ignores not-found).
+pub async fn remove_all(docker: &Docker, project_id: &str) -> Result<()> {
+    remove(docker, &network_name(project_id)).await?;
+    remove(docker, &agent_network_name(project_id)).await
 }
 
 /// Remove the named network (best-effort; ignores not-found).

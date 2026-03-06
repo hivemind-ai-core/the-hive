@@ -80,8 +80,19 @@ pub async fn start(project_dir: &Path) -> Result<()> {
     let docker = connect_docker()?;
     let id = &cfg.project_id;
 
-    // Ensure network exists (internal = no internet for agents if isolation enabled).
-    network::ensure(&docker, id, cfg.network.isolate).await?;
+    if cfg.network.isolate {
+        println!();
+        println!("WARNING: Agent network is isolated (network.isolate = true).");
+        println!("  Agents cannot reach external provider APIs (Anthropic, OpenAI, etc.).");
+        println!("  To allow provider access, set network.isolate = false in .hive/config.toml.");
+        println!("  For partial isolation, point ANTHROPIC_BASE_URL / OPENAI_BASE_URL at an egress proxy.");
+        println!();
+    }
+
+    // External network: server + app-daemon. Non-internal so host can reach published ports.
+    network::ensure(&docker, id).await?;
+    // Agent network: agents + server. Internal if isolation enabled.
+    network::ensure_agent_network(&docker, id, cfg.network.isolate).await?;
 
     // Build any missing images.
     ensure_images(&docker, &cfg, project_dir).await?;
@@ -100,8 +111,14 @@ pub async fn start(project_dir: &Path) -> Result<()> {
             }
         }
     }
-    if let Err(e) = containers::create_agents(&docker, &cfg, project_dir).await {
-        if !format!("{e:#}").contains("already in use") {
+    containers::create_agents(&docker, &cfg, project_dir).await?;
+
+    // Connect server to the agent network so agents can reach it by container name.
+    // Ignores "already connected" errors (container may have been created on a prior start).
+    if let Err(e) = containers::connect_to_network(
+        &docker, &server, &network::agent_network_name(id),
+    ).await {
+        if !format!("{e:#}").contains("already exists") {
             return Err(e);
         }
     }
@@ -117,6 +134,7 @@ pub async fn start(project_dir: &Path) -> Result<()> {
     }
 
     println!("All containers started. Run 'hive ui' to open the TUI.");
+    warn_missing_credentials(&cfg, project_dir);
     Ok(())
 }
 
@@ -126,8 +144,20 @@ pub async fn stop(project_dir: &Path, remove: bool) -> Result<()> {
     let docker = connect_docker()?;
     let id = &cfg.project_id;
 
+    // Build the set of known agent container names.
+    let known: Vec<String> = cfg.agents.iter()
+        .map(|a| containers::agent_name(id, &a.name))
+        .collect();
+
+    // Find agent containers that are no longer in the config (orphans).
+    let orphans = containers::orphaned_agent_names(&docker, id, &known).await
+        .unwrap_or_default();
+
     for agent in cfg.agents.iter().rev() {
         lifecycle::stop(&docker, &containers::agent_name(id, &agent.name)).await?;
+    }
+    for orphan in &orphans {
+        lifecycle::stop(&docker, orphan).await?;
     }
     lifecycle::stop(&docker, &containers::app_name(id)).await?;
     lifecycle::stop(&docker, &containers::server_name(id)).await?;
@@ -136,9 +166,12 @@ pub async fn stop(project_dir: &Path, remove: bool) -> Result<()> {
         for agent in cfg.agents.iter().rev() {
             lifecycle::remove(&docker, &containers::agent_name(id, &agent.name)).await?;
         }
+        for orphan in &orphans {
+            lifecycle::remove(&docker, orphan).await?;
+        }
         lifecycle::remove(&docker, &containers::app_name(id)).await?;
         lifecycle::remove(&docker, &containers::server_name(id)).await?;
-        network::remove(&docker, &network::network_name(id)).await?;
+        network::remove_all(&docker, id).await?;
         info!("All containers stopped and removed");
     } else {
         info!("All containers stopped");
@@ -152,12 +185,30 @@ pub async fn restart(project_dir: &Path) -> Result<()> {
     start(project_dir).await
 }
 
+/// Sync container binaries from ~/.hive/bin/ → .hive/bin/ so Docker builds pick up fresh builds.
+fn sync_bins(project_dir: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let bin_dst = hive_dir(project_dir).join("bin");
+    std::fs::create_dir_all(&bin_dst).context("creating .hive/bin/")?;
+    for name in &["hive-server", "hive-agent", "app-daemon"] {
+        let src = crate::install::container_binary(name);
+        anyhow::ensure!(src.exists(), "{} not found — run 'just install' first", src.display());
+        let dst = bin_dst.join(name);
+        std::fs::copy(&src, &dst).with_context(|| format!("syncing {name} to .hive/bin/"))?;
+        std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o755))
+            .with_context(|| format!("setting permissions on {name}"))?;
+    }
+    Ok(())
+}
+
 /// `hive rebuild [target]` — rebuild Docker images and replace running containers.
 pub async fn rebuild(project_dir: &Path, target: &str) -> Result<()> {
     let cfg = load_config(project_dir)?;
     let id = &cfg.project_id;
     let hive = hive_dir(project_dir);
     let docker = connect_docker()?;
+
+    sync_bins(project_dir)?;
 
     let all = [
         ("server", "Dockerfile.server", containers::server_image(id), containers::server_name(id)),
@@ -269,29 +320,56 @@ fn dotenv_set(path: &std::path::Path, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// `hive auth set-key KEY VALUE` — write an API key to `.hive/.env`.
-pub fn auth_set_key(project_dir: &Path, key: &str, value: &str) -> Result<()> {
+/// `hive auth set-key KEY VALUE [--agent NAME]` — write an API key.
+///
+/// Without `--agent`: writes to `.hive/.env` (shared across all agents).
+/// With `--agent NAME`: writes to that agent's `env:` block in `config.toml`.
+pub fn auth_set_key(project_dir: &Path, key: &str, value: &str, agent: Option<&str>) -> Result<()> {
     anyhow::ensure!(!key.is_empty(), "key must not be empty");
     anyhow::ensure!(!value.is_empty(), "value must not be empty");
 
-    let env_path = hive_dir(project_dir).join(".env");
-    dotenv_set(&env_path, key, value)?;
-
     let masked = if value.len() > 8 { format!("{}***", &value[..8]) } else { "***".to_string() };
-    println!("Set {key}={masked} in .hive/.env");
+
+    if let Some(name) = agent {
+        let config_path = default_path(project_dir);
+        let mut cfg = config::load(&config_path)?;
+        let agent = cfg.agents.iter_mut()
+            .find(|a| a.name == name)
+            .ok_or_else(|| anyhow::anyhow!("agent '{}' not found in config", name))?;
+        agent.env.insert(key.to_string(), value.to_string());
+        config::save(&cfg, &config_path)?;
+        println!("Set {key}={masked} in agent '{name}' env (config.toml)");
+    } else {
+        let env_path = hive_dir(project_dir).join(".env");
+        dotenv_set(&env_path, key, value)?;
+        println!("Set {key}={masked} in .hive/.env");
+    }
     println!("Run 'hive restart' to apply to running containers.");
     Ok(())
 }
 
-/// `hive auth set-endpoint KEY URL` — write a base URL to `.hive/.env`.
-pub fn auth_set_endpoint(project_dir: &Path, key: &str, url: &str) -> Result<()> {
+/// `hive auth set-endpoint KEY URL [--agent NAME]` — write a base URL.
+///
+/// Without `--agent`: writes to `.hive/.env` (shared across all agents).
+/// With `--agent NAME`: writes to that agent's `env:` block in `config.toml`.
+pub fn auth_set_endpoint(project_dir: &Path, key: &str, url: &str, agent: Option<&str>) -> Result<()> {
     anyhow::ensure!(!key.is_empty(), "key must not be empty");
     anyhow::ensure!(!url.is_empty(), "url must not be empty");
 
-    let env_path = hive_dir(project_dir).join(".env");
-    dotenv_set(&env_path, key, url)?;
-
-    println!("Set {key}={url} in .hive/.env");
+    if let Some(name) = agent {
+        let config_path = default_path(project_dir);
+        let mut cfg = config::load(&config_path)?;
+        let agent = cfg.agents.iter_mut()
+            .find(|a| a.name == name)
+            .ok_or_else(|| anyhow::anyhow!("agent '{}' not found in config", name))?;
+        agent.env.insert(key.to_string(), url.to_string());
+        config::save(&cfg, &config_path)?;
+        println!("Set {key}={url} in agent '{name}' env (config.toml)");
+    } else {
+        let env_path = hive_dir(project_dir).join(".env");
+        dotenv_set(&env_path, key, url)?;
+        println!("Set {key}={url} in .hive/.env");
+    }
     println!("Run 'hive restart' to apply to running containers.");
     Ok(())
 }
@@ -331,6 +409,55 @@ pub fn auth_list(project_dir: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Check each agent for missing credentials and print actionable warnings.
+/// Called after `hive start` to alert operators without blocking startup.
+fn warn_missing_credentials(cfg: &Config, project_dir: &Path) {
+    let hive = hive_dir(project_dir);
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root"));
+
+    let dotenv_path = hive.join(".env");
+    let dotenv_content = if dotenv_path.exists() {
+        std::fs::read_to_string(&dotenv_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let has_key = |key: &str| {
+        dotenv_content.lines().any(|l| {
+            l.trim_start().starts_with(key) && l.contains('=') && {
+                let v = l.splitn(2, '=').nth(1).unwrap_or("").trim();
+                !v.is_empty()
+            }
+        })
+    };
+
+    let claude_json_host = home.join(".claude.json");
+    let claude_json_hive = hive.join("claude.json");
+    let kilocode_dir_host = home.join(".kilocode");
+
+    for agent in &cfg.agents {
+        let missing = match agent.coding_agent.as_str() {
+            "claude" => {
+                !claude_json_host.exists()
+                    && !claude_json_hive.exists()
+                    && !has_key("ANTHROPIC_API_KEY")
+            }
+            "kilo" => {
+                !kilocode_dir_host.exists()
+                    && !has_key("ANTHROPIC_API_KEY")
+                    && !has_key("OPENAI_API_KEY")
+                    && !has_key("GOOGLE_API_KEY")
+            }
+            _ => false,
+        };
+
+        if missing {
+            println!();
+            println!("⚠  Agent '{}' has no credentials. Set an API key:", agent.name);
+            println!("     hive auth set-key ANTHROPIC_API_KEY sk-ant-...");
+        }
+    }
 }
 
 /// `hive auth status` — show what auth credentials are detected for each agent.
@@ -452,48 +579,99 @@ pub fn auth_sync(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `hive auth kilo-sync` — copy ~/.kilocode/ to .hive/kilocode/ for project-local kilo config.
+/// `hive auth kilo-sync --agent NAME` — select a kilo provider and write a minimal
+/// per-agent kilocode config to `.hive/kilocode-{name}/cli/config.json`.
 ///
-/// Once synced, the project-local copy is mounted instead of the global one,
-/// allowing per-project kilo settings without affecting other projects.
-pub fn auth_kilo_sync(project_dir: &Path) -> Result<()> {
-    let src = dirs::home_dir()
+/// Reads `~/.kilocode/cli/config.json`, lists the available providers, prompts the
+/// user to pick one, then writes a minimal config with just that provider (renamed to
+/// `"default"`) to the per-agent directory.
+pub fn auth_kilo_sync(project_dir: &Path, agent: Option<&str>) -> Result<()> {
+    let src_config = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?
-        .join(".kilocode");
+        .join(".kilocode/cli/config.json");
 
-    if !src.exists() {
+    if !src_config.exists() {
         anyhow::bail!(
-            "~/.kilocode not found.\n\
-             Install Kilo and run it at least once to create the config directory."
+            "~/.kilocode/cli/config.json not found.\n\
+             Install Kilo and run it at least once to create the config."
         );
     }
 
-    let dst = hive_dir(project_dir).join("kilocode");
-    if dst.exists() {
-        std::fs::remove_dir_all(&dst).context("removing existing .hive/kilocode/")?;
+    let raw = std::fs::read_to_string(&src_config)
+        .context("reading ~/.kilocode/cli/config.json")?;
+    let json: serde_json::Value = serde_json::from_str(&raw)
+        .context("parsing ~/.kilocode/cli/config.json")?;
+
+    let providers: Vec<(usize, String)> = json["providers"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .enumerate()
+                .filter_map(|(i, p)| p["id"].as_str().map(|id| (i, id.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if providers.is_empty() {
+        anyhow::bail!("No providers found in ~/.kilocode/cli/config.json");
     }
-    copy_dir_all(&src, &dst).context("copying ~/.kilocode to .hive/kilocode/")?;
-    println!("Copied ~/.kilocode → .hive/kilocode/");
-    println!("The directory will be auto-mounted as /home/agent/.kilocode in kilo agent containers.");
+
+    // Print provider list and prompt.
+    println!("Available kilo providers:");
+    for (i, (_, id)) in providers.iter().enumerate() {
+        println!("  [{i}] {id}");
+    }
+
+    let selected_idx = if providers.len() == 1 {
+        println!("Only one provider found — using '{}'.", providers[0].1);
+        0
+    } else {
+        print!("Select provider [0-{}]: ", providers.len() - 1);
+        use std::io::Write;
+        std::io::stdout().flush()?;
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        line.trim().parse::<usize>().context("invalid selection")?
+    };
+
+    let (arr_idx, provider_id) = providers
+        .get(selected_idx)
+        .ok_or_else(|| anyhow::anyhow!("selection out of range"))?;
+
+    // Build the minimal provider object with id renamed to "default".
+    let mut provider = json["providers"][*arr_idx].clone();
+    if let Some(obj) = provider.as_object_mut() {
+        obj.insert("id".to_string(), serde_json::Value::String("default".to_string()));
+    }
+
+    let out = serde_json::json!({
+        "providers": [provider],
+        "provider": "default"
+    });
+
+    let dst_name = match agent {
+        Some(name) => format!("kilocode-{name}"),
+        None => "kilocode".to_string(),
+    };
+    let dst_dir = hive_dir(project_dir).join(&dst_name).join("cli");
+    std::fs::create_dir_all(&dst_dir)
+        .with_context(|| format!("creating .hive/{dst_name}/cli/"))?;
+    std::fs::write(
+        dst_dir.join("config.json"),
+        serde_json::to_string_pretty(&out)?,
+    )
+    .with_context(|| format!("writing .hive/{dst_name}/cli/config.json"))?;
+
+    println!("Written provider '{provider_id}' → .hive/{dst_name}/cli/config.json");
+    if let Some(name) = agent {
+        println!("Per-agent config will be mounted for agent '{name}'.");
+    } else {
+        println!("Shared config will be mounted as /home/agent/.kilocode in all kilo containers.");
+    }
     println!("Run 'hive restart' to apply to running containers.");
     Ok(())
 }
 
-/// Recursively copy a directory.
-fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src).with_context(|| format!("reading {}", src.display()))? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        let dest = dst.join(entry.file_name());
-        if ty.is_dir() {
-            copy_dir_all(&entry.path(), &dest)?;
-        } else {
-            std::fs::copy(entry.path(), dest)?;
-        }
-    }
-    Ok(())
-}
 
 /// `hive auth login [--email]` — run `claude auth login` inside the first agent container,
 /// stream the URL to stdout, and copy the resulting credentials to .hive/claude.json.

@@ -43,7 +43,7 @@ pub fn run(project_dir: &Path) -> Result<()> {
                 env: Default::default(),
             });
         }
-        tui::config::run_wizard(seed)?
+        tui::config::run_wizard(seed, project_dir.to_path_buf())?
     } else {
         println!("Config already exists — skipping wizard. Edit {} to change settings.", config_path.display());
         existing
@@ -93,10 +93,14 @@ pub fn run(project_dir: &Path) -> Result<()> {
         println!("Copied {name} → .hive/bin/{name}");
     }
 
-    // Create .hive/agents/ so it exists before agent containers start writing session files.
+    // Pre-create per-agent session directories so Docker doesn't create them as root.
+    // Each agent container gets a rw bind for its own directory only.
     let agents_dir = hive.join("agents");
-    std::fs::create_dir_all(&agents_dir)
-        .with_context(|| format!("creating {}", agents_dir.display()))?;
+    for agent in &cfg.agents {
+        let agent_dir = agents_dir.join(&agent.name);
+        std::fs::create_dir_all(&agent_dir)
+            .with_context(|| format!("creating {}", agent_dir.display()))?;
+    }
 
     // Update .gitignore to exclude hive.db, .hive/bin/, etc.
     update_gitignore(project_dir)?;

@@ -46,6 +46,7 @@ impl Agent {
             crate::polling::run(
                 (*agent_id).clone(),
                 agent_tags,
+                (*coding_agent).clone(),
                 cmd_tx.clone(),
                 pending.clone(),
                 move |task| Self::spawn_task(task, Arc::clone(&agent_id), Arc::clone(&coding_agent), cmd_tx.clone(), pending.clone()),

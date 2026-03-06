@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 use super::state::{AppState, TaskSummary};
@@ -68,27 +68,54 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     );
 
     // Detail view.
-    render_detail(f, chunks[1], state.tasks.get(selected));
+    render_detail(f, chunks[1], state.tasks.get(selected), state.task_detail_scroll);
 }
 
-fn render_detail(f: &mut Frame, area: Rect, task: Option<&TaskSummary>) {
-    let block = Block::default().title("Detail").borders(Borders::ALL);
+fn render_detail(f: &mut Frame, area: Rect, task: Option<&TaskSummary>, scroll: u16) {
+    let block = Block::default().title("Detail ([ ] scroll)").borders(Borders::ALL);
     match task {
         None => f.render_widget(Paragraph::new("Select a task").block(block), area),
         Some(t) => {
-            let lines = vec![
-                Line::from(vec![Span::styled("ID: ", Style::default().add_modifier(Modifier::BOLD)), Span::raw(&t.id)]),
-                Line::from(vec![Span::styled("Title: ", Style::default().add_modifier(Modifier::BOLD)), Span::raw(&t.title)]),
+            let bold = Style::default().add_modifier(Modifier::BOLD);
+            let mut lines = vec![
+                Line::from(vec![Span::styled("ID: ", bold), Span::raw(&t.id)]),
+                Line::from(vec![Span::styled("Title: ", bold), Span::raw(&t.title)]),
                 Line::from(vec![
-                    Span::styled("Status: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled("Status: ", bold),
                     Span::styled(&t.status, Style::default().fg(status_color(&t.status))),
                 ]),
                 Line::from(vec![
-                    Span::styled("Assigned: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled("Assigned: ", bold),
                     Span::raw(t.assigned.as_deref().unwrap_or("-")),
                 ]),
             ];
-            f.render_widget(Paragraph::new(lines).block(block), area);
+            if !t.tags.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("Tags: ", bold),
+                    Span::styled(t.tags.join(", "), Style::default().fg(Color::Cyan)),
+                ]));
+            }
+            if let Some(ref desc) = t.description {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled("Description:", bold)));
+                for l in desc.lines() {
+                    lines.push(Line::from(Span::raw(l.to_string())));
+                }
+            }
+            if let Some(ref result) = t.result {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled("Result:", bold)));
+                for l in result.lines() {
+                    lines.push(Line::from(Span::raw(l.to_string())));
+                }
+            }
+            f.render_widget(
+                Paragraph::new(lines)
+                    .block(block)
+                    .wrap(Wrap { trim: false })
+                    .scroll((scroll, 0)),
+                area,
+            );
         }
     }
 }

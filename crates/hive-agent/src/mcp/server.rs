@@ -1,4 +1,6 @@
-//! MCP server using the rmcp crate over TCP transport.
+//! MCP server using the rmcp crate over Streamable HTTP transport.
+
+use std::sync::Arc;
 
 use rmcp::{
     ServerHandler,
@@ -6,13 +8,15 @@ use rmcp::{
     handler::server::wrapper::Parameters,
     model::*,
     schemars, tool, tool_handler, tool_router,
-    ServiceExt,
+    transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService,
+        session::local::LocalSessionManager,
+    },
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::client::{ClientCmd, PendingRequests};
 
@@ -243,26 +247,21 @@ impl ServerHandler for HiveMcpServer {
     }
 }
 
-// ── TCP server ────────────────────────────────────────────────────────────────
+// ── Streamable HTTP server ────────────────────────────────────────────────────
 
-/// Start the MCP TCP server. Accepts connections and serves each client in a spawned task.
+/// Start the MCP Streamable HTTP server on `http://127.0.0.1:{port}/mcp`.
 pub async fn serve(port: u16, state: McpState) -> anyhow::Result<()> {
     let addr = format!("127.0.0.1:{port}");
-    let listener = TcpListener::bind(&addr).await?;
-    info!("MCP TCP server listening on {addr}");
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    info!("MCP HTTP server listening on http://{addr}/mcp");
 
-    loop {
-        let (stream, peer) = listener.accept().await?;
-        let handler = HiveMcpServer::new(state.clone());
-        tokio::spawn(async move {
-            match handler.serve(stream).await {
-                Ok(running) => {
-                    info!("MCP client {peer} connected");
-                    running.waiting().await.ok();
-                    info!("MCP client {peer} disconnected");
-                }
-                Err(e) => warn!("MCP client {peer} init error: {e}"),
-            }
-        });
-    }
+    let mcp_service = StreamableHttpService::<HiveMcpServer, LocalSessionManager>::new(
+        move || Ok(HiveMcpServer::new(state.clone())),
+        Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default(),
+    );
+
+    let router = axum::Router::new().nest_service("/mcp", mcp_service);
+    axum::serve(listener, router).await?;
+    Ok(())
 }

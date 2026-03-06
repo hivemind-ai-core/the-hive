@@ -11,19 +11,21 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend, layout::{Constraint, Direction, Layout}};
 
+use std::path::PathBuf;
+
 use crate::config::Config;
 use super::screens;
 use super::state::{ConfigWizardState, WizardCmd, WizardScreen};
 
 /// Run the config wizard. Returns the updated `Config` on save, or an error on cancel.
-pub fn run(config: Config) -> Result<Config> {
+pub fn run(config: Config, project_dir: PathBuf) -> Result<Config> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut state = ConfigWizardState::new(config);
+    let mut state = ConfigWizardState::new(config, project_dir);
     let tick = Duration::from_millis(250);
 
     let result = loop {
@@ -44,6 +46,7 @@ pub fn run(config: Config) -> Result<Config> {
                 WizardScreen::App     => screens::app::render(f, chunks[1], &state),
                 WizardScreen::Exec    => screens::exec::render(f, chunks[1], &state),
                 WizardScreen::Logging => screens::logging::render(f, chunks[1], &state),
+                WizardScreen::Auth    => screens::auth::render(f, chunks[1], &state),
                 WizardScreen::Review  => screens::review::render(f, chunks[1], &state),
             }
             screens::render_footer(f, chunks[2], &state);
@@ -67,6 +70,7 @@ pub fn run(config: Config) -> Result<Config> {
             WizardScreen::App     => screens::app::handle(code, modifiers, &mut state),
             WizardScreen::Exec    => screens::exec::handle(code, modifiers, &mut state),
             WizardScreen::Logging => screens::logging::handle(code, modifiers, &mut state),
+            WizardScreen::Auth    => screens::auth::handle(code, modifiers, &mut state),
             WizardScreen::Review  => screens::review::handle(code, modifiers, &mut state),
         };
 

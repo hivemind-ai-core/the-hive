@@ -1,5 +1,7 @@
 //! Wizard state shared across all config screens.
 
+use std::path::PathBuf;
+
 use crate::config::Config;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9,6 +11,7 @@ pub enum WizardScreen {
     App,
     Exec,
     Logging,
+    Auth,
     Review,
 }
 
@@ -19,6 +22,7 @@ impl WizardScreen {
         WizardScreen::App,
         WizardScreen::Exec,
         WizardScreen::Logging,
+        WizardScreen::Auth,
         WizardScreen::Review,
     ];
 
@@ -28,7 +32,8 @@ impl WizardScreen {
             Self::Agents  => Self::App,
             Self::App     => Self::Exec,
             Self::Exec    => Self::Logging,
-            Self::Logging => Self::Review,
+            Self::Logging => Self::Auth,
+            Self::Auth    => Self::Review,
             Self::Review  => Self::Review,
         }
     }
@@ -40,7 +45,8 @@ impl WizardScreen {
             Self::App     => Self::Agents,
             Self::Exec    => Self::App,
             Self::Logging => Self::Exec,
-            Self::Review  => Self::Logging,
+            Self::Auth    => Self::Logging,
+            Self::Review  => Self::Auth,
         }
     }
 
@@ -51,6 +57,7 @@ impl WizardScreen {
             Self::App     => "App",
             Self::Exec    => "Exec",
             Self::Logging => "Logging",
+            Self::Auth    => "Auth",
             Self::Review  => "Review",
         }
     }
@@ -62,7 +69,8 @@ impl WizardScreen {
             Self::App     => 2,
             Self::Exec    => 3,
             Self::Logging => 4,
-            Self::Review  => 5,
+            Self::Auth    => 5,
+            Self::Review  => 6,
         }
     }
 }
@@ -90,10 +98,16 @@ pub struct ConfigWizardState {
     pub agent_edit: Option<usize>,
     /// Agents screen: which field within the agent edit form is focused.
     pub agent_subfield: usize,
+    /// Project directory, used by the Agents screen to write per-agent configs.
+    pub project_dir: PathBuf,
+    /// Kilo provider selection: available provider IDs loaded from ~/.kilocode/cli/config.json.
+    pub kilo_providers: Vec<String>,
+    /// Kilo provider selection: index of the currently highlighted provider.
+    pub kilo_provider_sel: usize,
 }
 
 impl ConfigWizardState {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, project_dir: PathBuf) -> Self {
         Self {
             config,
             screen: WizardScreen::Server,
@@ -102,6 +116,9 @@ impl ConfigWizardState {
             input: String::new(),
             agent_edit: None,
             agent_subfield: 0,
+            project_dir,
+            kilo_providers: vec![],
+            kilo_provider_sel: 0,
         }
     }
 
