@@ -89,3 +89,88 @@ async fn shutdown_signal() {
         .expect("failed to install Ctrl+C handler");
     info!("Shutting down");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn parse_hive_config(toml: &str) -> ExecConfig {
+        toml::from_str::<HiveConfig>(toml)
+            .unwrap_or_default()
+            .exec
+    }
+
+    fn load_from_file(content: &str) -> ExecConfig {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(content.as_bytes()).unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+        // Override env var so load_exec_config reads our temp file.
+        std::env::set_var("HIVE_CONFIG_PATH", &path);
+        let cfg = load_exec_config();
+        std::env::remove_var("HIVE_CONFIG_PATH");
+        cfg
+    }
+
+    #[test]
+    fn test_missing_config_file_uses_defaults() {
+        std::env::set_var("HIVE_CONFIG_PATH", "/tmp/hive-nonexistent-config-99999.toml");
+        let cfg = load_exec_config();
+        std::env::remove_var("HIVE_CONFIG_PATH");
+
+        // Default aliases must be present.
+        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"));
+        assert_eq!(cfg.commands.get("build").map(String::as_str), Some("pnpm build"));
+    }
+
+    #[test]
+    fn test_valid_config_overrides_commands() {
+        let toml = r#"
+[exec]
+commands = { "test" = "cargo test", "build" = "cargo build --release" }
+run_prefixes = ["cargo"]
+"#;
+        let cfg = load_from_file(toml);
+        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("cargo test"));
+        assert_eq!(cfg.commands.get("build").map(String::as_str), Some("cargo build --release"));
+        assert_eq!(cfg.run_prefixes, vec!["cargo"]);
+    }
+
+    #[test]
+    fn test_partial_config_missing_commands_uses_struct_default() {
+        // #[serde(default)] at struct level calls ExecConfig::default() for the whole struct,
+        // then overrides only the fields present in the TOML. Missing fields get the struct's
+        // Default values, NOT the type-level defaults (e.g. HashMap::new()).
+        // So specifying only run_prefixes still preserves the default command aliases.
+        let cfg = parse_hive_config("[exec]\nrun_prefixes = [\"cargo\"]");
+        assert!(!cfg.commands.is_empty(),
+            "Struct-level #[serde(default)] preserves default command aliases for missing fields");
+        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"));
+        assert_eq!(cfg.run_prefixes, vec!["cargo"]);
+    }
+
+    #[test]
+    fn test_malformed_toml_falls_back_to_defaults() {
+        let cfg = load_from_file("this is not [ valid toml {{{{");
+        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"),
+            "malformed TOML should fall back to defaults");
+    }
+
+    #[test]
+    fn test_empty_exec_section_uses_struct_default() {
+        // [exec] present but empty → struct-level #[serde(default)] kicks in for all fields.
+        // ExecConfig::default() is used, so all aliases and run_prefixes are present.
+        let cfg = parse_hive_config("[exec]");
+        assert!(!cfg.commands.is_empty(), "empty [exec] should still have default aliases");
+        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"));
+        assert!(!cfg.run_prefixes.is_empty());
+    }
+
+    #[test]
+    fn test_no_exec_section_uses_struct_default() {
+        // No [exec] section at all → HiveConfig uses #[serde(default)] → ExecConfig::default().
+        let cfg = parse_hive_config("[other_section]\nfoo = 1");
+        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"),
+            "missing [exec] section should use ExecConfig::default()");
+    }
+}

@@ -85,6 +85,54 @@ fn resolve_command(command: &str, config: &ExecConfig) -> Result<String, String>
     ))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_cfg() -> ExecConfig {
+        ExecConfig::default()
+    }
+
+    #[test]
+    fn test_resolve_known_alias() {
+        let cfg = default_cfg();
+        assert_eq!(resolve_command("test", &cfg).unwrap(), "pnpm test");
+        assert_eq!(resolve_command("build", &cfg).unwrap(), "pnpm build");
+        assert_eq!(resolve_command("check", &cfg).unwrap(), "pnpm exec tsc --noEmit");
+    }
+
+    #[test]
+    fn test_resolve_run_prefix_allowed() {
+        let cfg = default_cfg();
+        assert_eq!(resolve_command("run cargo test", &cfg).unwrap(), "cargo test");
+        assert_eq!(resolve_command("run pnpm install", &cfg).unwrap(), "pnpm install");
+        // Exact prefix match (no trailing args).
+        assert_eq!(resolve_command("run cargo", &cfg).unwrap(), "cargo");
+    }
+
+    #[test]
+    fn test_resolve_run_prefix_rejected() {
+        let cfg = default_cfg();
+        let err = resolve_command("run rm -rf /", &cfg).unwrap_err();
+        assert!(err.contains("not allowed"), "rejected run cmd error: {err}");
+    }
+
+    #[test]
+    fn test_resolve_unknown_command_errors() {
+        let cfg = default_cfg();
+        let err = resolve_command("deploy", &cfg).unwrap_err();
+        assert!(err.contains("unknown command"), "error: {err}");
+        assert!(err.contains("deploy"), "error should mention the command: {err}");
+    }
+
+    #[test]
+    fn test_resolve_custom_alias_overrides_default() {
+        let mut cfg = default_cfg();
+        cfg.commands.insert("test".to_string(), "jest --ci".to_string());
+        assert_eq!(resolve_command("test", &cfg).unwrap(), "jest --ci");
+    }
+}
+
 pub async fn exec(
     State(config): State<ExecConfig>,
     Json(req): Json<ExecRequest>,

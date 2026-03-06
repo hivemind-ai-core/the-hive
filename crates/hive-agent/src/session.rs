@@ -49,6 +49,67 @@ pub fn clear(agent_id: &str) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::extract_from_output;
+
+    #[test]
+    fn test_kilo_format() {
+        assert_eq!(extract_from_output("Session: abc123\nsome other output"), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn test_claude_plain_text_format() {
+        assert_eq!(extract_from_output("Session ID: xyz-789"), Some("xyz-789".to_string()));
+    }
+
+    #[test]
+    fn test_old_format() {
+        assert_eq!(extract_from_output("session-id: old-format-id"), Some("old-format-id".to_string()));
+    }
+
+    #[test]
+    fn test_json_stream_session_id_field() {
+        let output = r#"{"sessionId":"json-session-1","type":"result"}"#;
+        assert_eq!(extract_from_output(output), Some("json-session-1".to_string()));
+    }
+
+    #[test]
+    fn test_json_stream_snake_case_variant() {
+        let output = r#"{"session_id":"json-session-2"}"#;
+        assert_eq!(extract_from_output(output), Some("json-session-2".to_string()));
+    }
+
+    #[test]
+    fn test_json_stream_last_one_wins() {
+        let output = "first line\n{\"sessionId\":\"first\"}\n{\"sessionId\":\"second\"}\nlast line";
+        assert_eq!(extract_from_output(output), Some("second".to_string()));
+    }
+
+    #[test]
+    fn test_plain_text_short_circuits_json() {
+        // Plain text `Session:` line before JSON — returns immediately without scanning JSON.
+        let output = "Session: plain-wins\n{\"sessionId\":\"json-would-lose\"}";
+        assert_eq!(extract_from_output(output), Some("plain-wins".to_string()));
+    }
+
+    #[test]
+    fn test_no_session_returns_none() {
+        assert_eq!(extract_from_output("No session here\nJust some output"), None);
+    }
+
+    #[test]
+    fn test_json_without_session_key_returns_none() {
+        let output = r#"{"type":"tool_use","name":"bash"}"#;
+        assert_eq!(extract_from_output(output), None);
+    }
+
+    #[test]
+    fn test_empty_string_returns_none() {
+        assert_eq!(extract_from_output(""), None);
+    }
+}
+
 /// Extract a session ID from coding agent output.
 ///
 /// Handles multiple formats:

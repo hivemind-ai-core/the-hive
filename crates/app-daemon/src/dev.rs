@@ -63,6 +63,33 @@ fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::shell_escape;
+
+    #[test]
+    fn test_shell_escape_plain_string() {
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+    }
+
+    #[test]
+    fn test_shell_escape_single_quotes() {
+        // "it's" → 'it'\''s'
+        assert_eq!(shell_escape("it's a test"), r"'it'\''s a test'");
+    }
+
+    #[test]
+    fn test_shell_escape_empty() {
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn test_shell_escape_multiple_quotes() {
+        // "a'b'c" → 'a'\''b'\''c'
+        assert_eq!(shell_escape("a'b'c"), r"'a'\''b'\''c'");
+    }
+}
+
 async fn run_command(cmd: &str) -> CommandResponse {
     info!("{}", cmd);
     let output = Command::new("sh").arg("-c").arg(cmd).output().await;

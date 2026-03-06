@@ -54,7 +54,7 @@ pub fn list_topics_since(pool: &DbPool, since_unix: i64) -> Result<Vec<Topic>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT id, title, content, creator_agent_id, created_at, last_updated_at
-         FROM topics WHERE last_updated_at > datetime(?1, 'unixepoch')
+         FROM topics WHERE CAST(strftime('%s', last_updated_at) AS INTEGER) > ?1
          ORDER BY last_updated_at DESC",
     )?;
     let rows = stmt.query_map(params![since_unix], |row| row_to_topic(row))?;

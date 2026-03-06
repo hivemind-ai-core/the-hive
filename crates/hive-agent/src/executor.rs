@@ -34,6 +34,54 @@ pub fn build_prompt(task: &Task, messages: &[PushMessage]) -> String {
     prompt
 }
 
+/// Write the MCP server config files so the coding agent subprocess can discover the hive tools.
+///
+/// Writes `.mcp.json` for Claude Code and `.kilocode/mcp.json` for Kilo, both pointing at
+/// the hive TCP MCP server on 127.0.0.1:mcp_port.
+fn write_mcp_configs(mcp_port: u16) {
+    let config = serde_json::json!({
+        "mcpServers": {
+            "hive": {
+                "transport": "tcp",
+                "host": "127.0.0.1",
+                "port": mcp_port
+            }
+        }
+    });
+    let content = serde_json::to_string_pretty(&config).unwrap_or_default();
+
+    // Claude Code: .mcp.json in project root
+    if let Err(e) = std::fs::write(".mcp.json", &content) {
+        warn!("Failed to write .mcp.json: {e}");
+    }
+
+    // Kilo: .kilocode/mcp.json — merge the hive entry into any existing config.
+    let kilocode_dir = std::path::Path::new(".kilocode");
+    if let Err(e) = std::fs::create_dir_all(kilocode_dir) {
+        warn!("Failed to create .kilocode/: {e}");
+        return;
+    }
+    let kilo_path = kilocode_dir.join("mcp.json");
+    let mut kilo_cfg: serde_json::Value = kilo_path
+        .exists()
+        .then(|| std::fs::read_to_string(&kilo_path).ok())
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({ "mcpServers": {} }));
+
+    if let Some(servers) = kilo_cfg.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+        servers.insert("hive".to_string(), serde_json::json!({
+            "transport": "tcp",
+            "host": "127.0.0.1",
+            "port": mcp_port
+        }));
+    }
+    let kilo_content = serde_json::to_string_pretty(&kilo_cfg).unwrap_or_default();
+    if let Err(e) = std::fs::write(&kilo_path, kilo_content) {
+        warn!("Failed to write .kilocode/mcp.json: {e}");
+    }
+}
+
 /// Execute the coding agent with the given task and any pending push messages.
 ///
 /// `agent_bin` is the agent executable name (`kilo`, `claude`, etc.).
@@ -46,6 +94,12 @@ pub async fn run(
 ) -> Result<ExecutionResult> {
     let prompt = build_prompt(task, messages);
     info!("Spawning '{agent_bin}' for task: {}", task.id);
+
+    let mcp_port: u16 = std::env::var("HIVE_MCP_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7890);
+    write_mcp_configs(mcp_port);
 
     let session_id = crate::session::load(agent_id);
 

@@ -144,7 +144,7 @@ fn generate_project_id(project_dir: &Path) -> String {
 
 fn update_gitignore(project_dir: &Path) -> Result<()> {
     let gitignore = project_dir.join(".gitignore");
-    let entries = [".hive/hive.db", ".hive/bin/", ".hive/.env", ".hive/claude.json", ".hive/agents/", ".hive/kilocode/"];
+    let entries = [".hive/hive.db", ".hive/bin/", ".hive/.env", ".hive/claude.json", ".hive/agents/", ".hive/kilocode/", ".mcp.json"];
 
     let existing = if gitignore.exists() {
         std::fs::read_to_string(&gitignore).context("reading .gitignore")?
