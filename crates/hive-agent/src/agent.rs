@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use hive_core::types::Task;
+use hive_core::types::{PushMessage, Task};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{info, warn};
 
@@ -47,8 +47,8 @@ impl Agent {
                 (*agent_id).clone(),
                 agent_tags,
                 cmd_tx.clone(),
-                pending,
-                move |task| Self::spawn_task(task, Arc::clone(&agent_id), Arc::clone(&coding_agent), cmd_tx.clone()),
+                pending.clone(),
+                move |task| Self::spawn_task(task, Arc::clone(&agent_id), Arc::clone(&coding_agent), cmd_tx.clone(), pending.clone()),
             )
             .await;
         });
@@ -59,11 +59,34 @@ impl Agent {
         agent_id: Arc<String>,
         coding_agent: Arc<String>,
         cmd_tx: UnboundedSender<ClientCmd>,
+        pending: PendingRequests,
     ) {
         tokio::spawn(async move {
             info!("Running task: {} ({})", task.title, task.id);
 
-            let result = crate::executor::run(&task, &coding_agent, &agent_id, &[]).await;
+            // Fetch undelivered push messages before starting the task.
+            let push_req = client::request(
+                "push.list",
+                Some(serde_json::json!({ "agent_id": *agent_id })),
+            );
+            let message_ids: Vec<String>;
+            let messages: Vec<PushMessage> =
+                match crate::polling::send_request(&cmd_tx, &pending, push_req).await {
+                    Some(resp) => {
+                        let msgs: Vec<PushMessage> = resp.result
+                            .and_then(|v| serde_json::from_value(v).ok())
+                            .unwrap_or_default();
+                        message_ids = msgs.iter().map(|m| m.id.clone()).collect();
+                        msgs
+                    }
+                    None => {
+                        warn!("Failed to fetch push messages for task {}", task.id);
+                        message_ids = vec![];
+                        vec![]
+                    }
+                };
+
+            let result = crate::executor::run(&task, &coding_agent, &agent_id, &messages).await;
             let result_str = match result {
                 Ok(r) => {
                     if r.exit_code != 0 {
@@ -76,6 +99,17 @@ impl Agent {
                     Some(format!("error: {e}"))
                 }
             };
+
+            // Acknowledge the push messages that were included in the prompt.
+            if !message_ids.is_empty() {
+                let ack_req = client::request(
+                    "push.ack",
+                    Some(serde_json::json!({ "message_ids": message_ids })),
+                );
+                if let Err(e) = cmd_tx.send(ClientCmd::Send(ack_req)) {
+                    warn!("Failed to send push.ack for task {}: {e}", task.id);
+                }
+            }
 
             let complete_req = client::request(
                 "task.complete",

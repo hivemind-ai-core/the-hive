@@ -1,19 +1,6 @@
-//! Hive Server - Coordination control plane for The Hive.
-//!
-//! Runs in a Docker container and handles:
-//! - Task tracker (create, list, claim, update, complete)
-//! - Message board (topics, comments)
-//! - Push message routing
-//! - Agent registry
+//! Hive Server binary — coordination control plane for The Hive.
 
-mod communication;
-mod db;
-mod handlers;
-mod message_board;
-mod state;
-mod tasks;
-mod ws;
-
+use hive_server::{db, state, ws};
 use tracing::info;
 
 #[tokio::main]
@@ -37,9 +24,10 @@ async fn main() -> anyhow::Result<()> {
     info!("Database ready");
 
     let state = state::AppState::new(pool);
-    let addr = format!("0.0.0.0:{port}").parse()?;
+    let addr: std::net::SocketAddr = format!("0.0.0.0:{port}").parse()?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
 
-    ws::serve(addr, state).await?;
+    ws::serve(listener, state).await?;
 
     Ok(())
 }

@@ -1,54 +1,22 @@
-//! MCP JSON-RPC HTTP server.
+//! MCP server using the rmcp crate over TCP transport.
 
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    routing::post,
+use rmcp::{
+    ServerHandler,
+    handler::server::router::tool::ToolRouter,
+    handler::server::wrapper::Parameters,
+    model::*,
+    schemars, tool, tool_handler, tool_router,
+    ServiceExt,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::client::{ClientCmd, PendingRequests};
 
-/// JSON-RPC 2.0 request.
-#[derive(Debug, Deserialize)]
-pub struct RpcRequest {
-    pub jsonrpc: String,
-    pub id: Option<Value>,
-    pub method: String,
-    pub params: Option<Value>,
-}
-
-/// JSON-RPC 2.0 response.
-#[derive(Debug, Serialize)]
-pub struct RpcResponse {
-    pub jsonrpc: &'static str,
-    pub id: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<RpcError>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct RpcError {
-    pub code: i32,
-    pub message: String,
-}
-
-impl RpcResponse {
-    pub fn ok(id: Option<Value>, result: Value) -> Self {
-        Self { jsonrpc: "2.0", id, result: Some(result), error: None }
-    }
-
-    pub fn err(id: Option<Value>, code: i32, message: String) -> Self {
-        Self { jsonrpc: "2.0", id, result: None, error: Some(RpcError { code, message }) }
-    }
-}
+// ── Shared state passed to every handler instance ─────────────────────────────
 
 #[derive(Clone)]
 pub struct McpState {
@@ -59,59 +27,242 @@ pub struct McpState {
     pub http: reqwest::Client,
 }
 
-/// Start the MCP HTTP server. Does not return (runs until process exits).
-pub async fn serve(port: u16, state: McpState) -> anyhow::Result<()> {
-    let app = Router::new()
-        .route("/", post(handle_rpc))
-        .with_state(state);
+// ── Parameter structs for tools that accept arguments ────────────────────────
 
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct TaskGetNextParams {
+    tag: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TaskCompleteParams {
+    id: String,
+    result: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TopicCreateParams {
+    title: String,
+    content: String,
+    creator_agent_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TopicGetParams {
+    id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TopicCommentParams {
+    topic_id: String,
+    content: String,
+    creator_agent_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TopicWaitParams {
+    id: String,
+    min_comments: Option<u64>,
+    timeout_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct PushSendParams {
+    to_agent_id: String,
+    content: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct AppExecParams {
+    command: String,
+    pattern: Option<String>,
+}
+
+// ── MCP server handler ────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct HiveMcpServer {
+    state: McpState,
+    tool_router: ToolRouter<HiveMcpServer>,
+}
+
+impl HiveMcpServer {
+    fn new(state: McpState) -> Self {
+        Self {
+            state,
+            tool_router: Self::tool_router(),
+        }
+    }
+}
+
+#[tool_router]
+impl HiveMcpServer {
+    /// Get the next pending task. The task is assigned to the current agent.
+    #[tool(name = "task.get_next", description = "Get the next pending task for the current agent")]
+    async fn task_get_next(
+        &self,
+        Parameters(p): Parameters<TaskGetNextParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({ "tag": p.tag });
+        super::tools::tasks::get_next(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Mark the specified task as done.
+    #[tool(name = "task.complete", description = "Mark a task as done and get the next task")]
+    async fn task_complete(
+        &self,
+        Parameters(p): Parameters<TaskCompleteParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({ "id": p.id, "result": p.result });
+        super::tools::tasks::complete(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Create a new discussion topic on the message board.
+    #[tool(name = "topic.create", description = "Create a new discussion topic on the message board")]
+    async fn topic_create(
+        &self,
+        Parameters(p): Parameters<TopicCreateParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({
+            "title": p.title,
+            "content": p.content,
+            "creator_agent_id": p.creator_agent_id,
+        });
+        super::tools::topics::create(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// List all topics on the message board.
+    #[tool(name = "topic.list", description = "List all discussion topics on the message board")]
+    async fn topic_list(&self) -> Result<String, String> {
+        super::tools::topics::list(&self.state, None).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Get a topic and its comments.
+    #[tool(name = "topic.get", description = "Get a discussion topic and all its comments")]
+    async fn topic_get(
+        &self,
+        Parameters(p): Parameters<TopicGetParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({ "id": p.id });
+        super::tools::topics::get(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Post a comment on a topic.
+    #[tool(name = "topic.comment", description = "Post a comment on a discussion topic")]
+    async fn topic_comment(
+        &self,
+        Parameters(p): Parameters<TopicCommentParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({
+            "topic_id": p.topic_id,
+            "content": p.content,
+            "creator_agent_id": p.creator_agent_id,
+        });
+        super::tools::topics::comment(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Wait for a topic to receive a minimum number of comments.
+    #[tool(name = "topic.wait", description = "Wait until a topic has a minimum number of comments")]
+    async fn topic_wait(
+        &self,
+        Parameters(p): Parameters<TopicWaitParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({
+            "id": p.id,
+            "min_comments": p.min_comments,
+            "timeout_secs": p.timeout_secs,
+        });
+        super::tools::topics::wait(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Send a push message to another agent.
+    #[tool(name = "push.send", description = "Send a direct message to another agent")]
+    async fn push_send(
+        &self,
+        Parameters(p): Parameters<PushSendParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({
+            "to_agent_id": p.to_agent_id,
+            "content": p.content,
+        });
+        super::tools::push::send(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// List unread push messages for the current agent.
+    #[tool(name = "push.list", description = "List unread direct messages for the current agent")]
+    async fn push_list(&self) -> Result<String, String> {
+        super::tools::push::list(&self.state, None).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Run a command via the app-daemon (build, test, etc.).
+    #[tool(name = "app.exec", description = "Run a project command (build, test, run <cmd>) via the app-daemon")]
+    async fn app_exec(
+        &self,
+        Parameters(p): Parameters<AppExecParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({
+            "command": p.command,
+            "pattern": p.pattern,
+        });
+        super::tools::app_exec::exec(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[tool_handler]
+impl ServerHandler for HiveMcpServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(
+                "hive-agent-mcp",
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .with_instructions(
+                "Hive Agent MCP server. Use these tools to coordinate work, \
+                 manage tasks, communicate with other agents, and run project commands.",
+            )
+    }
+}
+
+// ── TCP server ────────────────────────────────────────────────────────────────
+
+/// Start the MCP TCP server. Accepts connections and serves each client in a spawned task.
+pub async fn serve(port: u16, state: McpState) -> anyhow::Result<()> {
     let addr = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&addr).await?;
-    info!("MCP server listening on {addr}");
+    info!("MCP TCP server listening on {addr}");
 
-    axum::serve(listener, app).await?;
-    Ok(())
-}
-
-async fn handle_rpc(
-    State(state): State<McpState>,
-    Json(req): Json<RpcRequest>,
-) -> (StatusCode, Json<RpcResponse>) {
-    if req.jsonrpc != "2.0" {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(RpcResponse::err(req.id, -32600, "invalid JSON-RPC version".into())),
-        );
-    }
-
-    let result = dispatch(&req.method, req.params, &state).await;
-
-    match result {
-        Ok(v) => (StatusCode::OK, Json(RpcResponse::ok(req.id, v))),
-        Err(e) => (
-            StatusCode::OK, // JSON-RPC errors still return 200
-            Json(RpcResponse::err(req.id, -32603, e.to_string())),
-        ),
-    }
-}
-
-async fn dispatch(
-    method: &str,
-    params: Option<Value>,
-    state: &McpState,
-) -> anyhow::Result<Value> {
-    use super::tools;
-    match method {
-        "task.get_next"  => tools::tasks::get_next(state, params).await,
-        "task.complete"  => tools::tasks::complete(state, params).await,
-        "topic.create"   => tools::topics::create(state, params).await,
-        "topic.list"     => tools::topics::list(state, params).await,
-        "topic.get"      => tools::topics::get(state, params).await,
-        "topic.comment"  => tools::topics::comment(state, params).await,
-        "topic.wait"     => tools::topics::wait(state, params).await,
-        "push.send"      => tools::push::send(state, params).await,
-        "push.list"      => tools::push::list(state, params).await,
-        "app.exec"       => tools::app_exec::exec(state, params).await,
-        _ => anyhow::bail!("method not found: {method}"),
+    loop {
+        let (stream, peer) = listener.accept().await?;
+        let handler = HiveMcpServer::new(state.clone());
+        tokio::spawn(async move {
+            match handler.serve(stream).await {
+                Ok(running) => {
+                    info!("MCP client {peer} connected");
+                    running.waiting().await.ok();
+                    info!("MCP client {peer} disconnected");
+                }
+                Err(e) => warn!("MCP client {peer} init error: {e}"),
+            }
+        });
     }
 }

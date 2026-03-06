@@ -57,13 +57,19 @@ pub fn list(pool: &DbPool, agent_id: &str) -> Result<Value> {
     Ok(serde_json::to_value(&msgs)?)
 }
 
-/// Mark a specific message as delivered (explicit ACK from agent).
+/// Mark a batch of messages as delivered (explicit ACK from agent).
 pub fn ack(pool: &DbPool, params: Option<Value>) -> Result<Value> {
-    let id = params
+    let ids: Vec<String> = params
         .as_ref()
-        .and_then(|v| v.get("id"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("params.id is required"))?;
-    db_comm::mark_delivered(pool, id)?;
-    Ok(serde_json::json!({ "ok": true }))
+        .and_then(|v| v.get("message_ids"))
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("params.message_ids (array) is required"))?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+
+    for id in &ids {
+        db_comm::mark_delivered(pool, id)?;
+    }
+    Ok(serde_json::json!({ "ok": true, "acked": ids.len() }))
 }

@@ -48,9 +48,8 @@ pub async fn run(
                 backoff = (backoff * 2).min(BACKOFF_MAX);
             }
             Some(msg) if msg.result.as_ref().map(|v| v.is_null()).unwrap_or(false) => {
-                // No task available.
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(BACKOFF_MAX);
+                // No task available — use a fixed interval, not exponential backoff.
+                tokio::time::sleep(POLL_INTERVAL).await;
             }
             Some(msg) => {
                 if let Some(result) = msg.result {

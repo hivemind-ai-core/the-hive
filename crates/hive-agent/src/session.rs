@@ -51,18 +51,41 @@ pub fn clear(agent_id: &str) {
 
 /// Extract a session ID from coding agent output.
 ///
-/// Kilo outputs: `Session: <id>`
-/// Claude outputs: `session-id: <id>`
+/// Handles multiple formats:
+/// - Kilo: `Session: <id>`
+/// - Claude Code plain text: `Session ID: <id>`
+/// - Claude Code JSON stream: `{"sessionId":"<id>",...}` or `{"session_id":"<id>",...}`
 pub fn extract_from_output(output: &str) -> Option<String> {
+    let mut last_json_id: Option<String> = None;
+
     for line in output.lines() {
         let line = line.trim();
+
+        // Plain text patterns.
         if let Some(id) = line.strip_prefix("Session: ") {
+            return Some(id.trim().to_string());
+        }
+        if let Some(id) = line.strip_prefix("Session ID: ") {
             return Some(id.trim().to_string());
         }
         if let Some(id) = line.strip_prefix("session-id: ") {
             return Some(id.trim().to_string());
         }
+
+        // JSON stream pattern — try to parse each line as JSON.
+        if line.starts_with('{') {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                let id = v.get("sessionId")
+                    .or_else(|| v.get("session_id"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                if id.is_some() {
+                    last_json_id = id;
+                }
+            }
+        }
     }
-    None
+
+    last_json_id
 }
 

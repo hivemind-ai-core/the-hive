@@ -79,17 +79,30 @@ pub fn update(pool: &DbPool, params: Option<Value>) -> Result<Value> {
 
 pub fn split(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     use hive_core::types::Task as HiveTask;
-    #[derive(serde::Deserialize)]
-    struct SubtaskDef { title: String, description: Option<String>, #[serde(default)] tags: Vec<String> }
-    #[derive(serde::Deserialize)]
-    struct SplitParams { id: String, subtasks: Vec<SubtaskDef> }
 
-    let p: SplitParams = serde_json::from_value(params.unwrap_or(Value::Null))?;
-    let subtasks: Vec<HiveTask> = p.subtasks
-        .into_iter()
-        .map(|s| HiveTask::new(s.title, s.description, s.tags))
-        .collect();
-    let created = db_tasks::split(pool, &p.id, subtasks)?;
+    let p = params.unwrap_or(Value::Null);
+    let id = p.get("id").and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("params.id is required"))?;
+    let raw_subtasks = p.get("subtasks").and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("params.subtasks (array) is required"))?;
+
+    let subtasks: Vec<HiveTask> = raw_subtasks.iter().map(|v| {
+        if let Some(title) = v.as_str() {
+            // Plain string — treat as title only.
+            HiveTask::new(title.to_string(), None, vec![])
+        } else {
+            // Object with title, optional description and tags.
+            let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let description = v.get("description").and_then(|d| d.as_str()).map(str::to_string);
+            let tags: Vec<String> = v.get("tags")
+                .and_then(|t| t.as_array())
+                .map(|arr| arr.iter().filter_map(|t| t.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            HiveTask::new(title, description, tags)
+        }
+    }).collect();
+
+    let created = db_tasks::split(pool, id, subtasks)?;
     Ok(serde_json::to_value(&created)?)
 }
 
@@ -111,15 +124,19 @@ pub fn get_next(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<
     }
 }
 
-pub fn complete(pool: &DbPool, params: Option<Value>) -> Result<Value> {
+pub fn complete(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<Value> {
     let p = params.unwrap_or(Value::Null);
     let id = p.get("id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.id is required"))?;
     let result = p.get("result").and_then(|v| v.as_str()).map(str::to_string);
 
-    let task = db_tasks::complete(pool, id, result)?;
-    Ok(serde_json::to_value(&task)?)
+    db_tasks::complete(pool, id, result)?;
+    let next_task = db_tasks::get_next(pool, agent_id, None)?;
+    Ok(serde_json::json!({
+        "completed": id,
+        "next_task": next_task,
+    }))
 }
 
 fn parse_status(s: &str) -> Result<hive_core::types::TaskStatus> {

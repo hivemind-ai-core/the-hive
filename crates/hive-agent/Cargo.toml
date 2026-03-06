@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0.102"
 axum = "0.8.8"
+rmcp = { version = "1.1.0", features = ["server"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 futures-util = "0.3.32"
 hive-core = { version = "0.1.0", path = "../hive-core" }

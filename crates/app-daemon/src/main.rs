@@ -23,7 +23,7 @@ struct HiveConfig {
 
 fn load_exec_config() -> ExecConfig {
     let config_path = std::env::var("HIVE_CONFIG_PATH")
-        .unwrap_or_else(|_| "/config/config.toml".to_string());
+        .unwrap_or_else(|_| "/app/.hive/config.toml".to_string());
 
     match std::fs::read_to_string(&config_path) {
         Ok(content) => match toml::from_str::<HiveConfig>(&content) {

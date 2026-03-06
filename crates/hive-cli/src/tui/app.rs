@@ -328,8 +328,8 @@ impl App {
                     self.task_edit_dialog = Some(TaskEditDialog {
                         id: task.id.clone(),
                         title: task.title.clone(),
-                        description: String::new(),
-                        tags: String::new(),
+                        description: task.description.clone().unwrap_or_default(),
+                        tags: task.tags.join(", "),
                         active_field: TaskDialogField::Title,
                     });
                 }
@@ -355,6 +355,13 @@ impl App {
                         topic_id: topic.id.clone(),
                         content: String::new(),
                     });
+                }
+            }
+            Action::Select if self.screen == Screen::MessageBoard => {
+                if let Some(topic) = self.state.topics.get(self.state.selected_topic_idx) {
+                    if let Some(ref tx) = self.cmd_tx {
+                        let _ = tx.send(TuiCmd::FetchTopic { topic_id: topic.id.clone() });
+                    }
                 }
             }
             Action::Char('s') if self.screen == Screen::Settings => {
@@ -394,12 +401,38 @@ impl App {
                 }
             }
             Action::Down => {
-                if self.state.selected_task_idx + 1 < self.state.tasks.len() {
-                    self.state.selected_task_idx += 1;
+                match self.screen {
+                    Screen::Tasks => {
+                        if self.state.selected_task_idx + 1 < self.state.tasks.len() {
+                            self.state.selected_task_idx += 1;
+                        }
+                    }
+                    Screen::MessageBoard => {
+                        if self.state.selected_topic_idx + 1 < self.state.topics.len() {
+                            self.state.selected_topic_idx += 1;
+                        }
+                    }
+                    Screen::Agents => {
+                        if self.state.selected_agent_idx + 1 < self.state.agents.len() {
+                            self.state.selected_agent_idx += 1;
+                        }
+                    }
+                    _ => {}
                 }
             }
             Action::Up => {
-                self.state.selected_task_idx = self.state.selected_task_idx.saturating_sub(1);
+                match self.screen {
+                    Screen::Tasks => {
+                        self.state.selected_task_idx = self.state.selected_task_idx.saturating_sub(1);
+                    }
+                    Screen::MessageBoard => {
+                        self.state.selected_topic_idx = self.state.selected_topic_idx.saturating_sub(1);
+                    }
+                    Screen::Agents => {
+                        self.state.selected_agent_idx = self.state.selected_agent_idx.saturating_sub(1);
+                    }
+                    _ => {}
+                }
             }
             _ => {}
         }
@@ -521,6 +554,10 @@ pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<(
                 comment_count: 0,
                 last_updated: Some(t.last_updated_at.to_rfc3339()),
             }).collect();
+            if update.topic_detail_id.is_some() {
+                app.state.topic_detail_id = update.topic_detail_id;
+                app.state.topic_comments = update.topic_comments;
+            }
         }
 
         terminal.draw(|f| {

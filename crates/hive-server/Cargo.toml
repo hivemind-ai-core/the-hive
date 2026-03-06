@@ -6,6 +6,10 @@ license = "MIT"
 authors = ["The Hive Team"]
 rust-version = "1.93"
 
+[lib]
+name = "hive_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "hive-server"
 path = "src/main.rs"
@@ -27,3 +31,5 @@ uuid = { version = "1.21.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 tokio-test = "0.4.5"
+tokio-tungstenite = "0.28"
+futures-util = "0.3"

@@ -1,9 +1,11 @@
 //! Dev server and observability command endpoints.
 
-use axum::Json;
+use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::info;
+
+use crate::exec::ExecConfig;
 
 #[derive(Debug, Serialize)]
 pub struct CommandResponse {
@@ -17,35 +19,43 @@ pub struct TestRequest {
     pub pattern: Option<String>,
 }
 
-pub async fn start() -> Json<CommandResponse> {
-    Json(run_npm("run dev").await)
+pub async fn start(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
+    let cmd = cfg.commands.get("start").cloned().unwrap_or_else(|| "npm run dev".to_string());
+    Json(run_command(&cmd).await)
 }
 
-pub async fn stop() -> Json<CommandResponse> {
-    Json(run_npm("run stop").await)
+pub async fn stop(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
+    let cmd = cfg.commands.get("stop").cloned().unwrap_or_else(|| "npm run stop".to_string());
+    Json(run_command(&cmd).await)
 }
 
-pub async fn restart() -> Json<CommandResponse> {
-    Json(run_npm("run restart").await)
+pub async fn restart(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
+    let cmd = cfg.commands.get("restart").cloned().unwrap_or_else(|| "npm run restart".to_string());
+    Json(run_command(&cmd).await)
 }
 
-pub async fn test(body: Option<Json<TestRequest>>) -> Json<CommandResponse> {
+pub async fn test(
+    State(cfg): State<ExecConfig>,
+    body: Option<Json<TestRequest>>,
+) -> Json<CommandResponse> {
+    let base = cfg.commands.get("test").cloned().unwrap_or_else(|| "npm test".to_string());
     let pattern = body.and_then(|b| b.0.pattern).unwrap_or_default();
     let cmd = if pattern.is_empty() {
-        "test".to_string()
+        base
     } else {
-        // npm test -- <pattern>  (the -- separates npm args from test runner args)
-        format!("test -- {}", shell_escape(&pattern))
+        format!("{base} {}", shell_escape(&pattern))
     };
-    Json(run_npm(&cmd).await)
+    Json(run_command(&cmd).await)
 }
 
-pub async fn check() -> Json<CommandResponse> {
-    Json(run_npm("run check").await)
+pub async fn check(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
+    let cmd = cfg.commands.get("check").cloned().unwrap_or_else(|| "npm run check".to_string());
+    Json(run_command(&cmd).await)
 }
 
-pub async fn logs() -> Json<CommandResponse> {
-    Json(run_npm("run logs").await)
+pub async fn logs(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
+    let cmd = cfg.commands.get("logs").cloned().unwrap_or_else(|| "npm run logs".to_string());
+    Json(run_command(&cmd).await)
 }
 
 /// Minimal shell escaping: wrap in single quotes and escape any single quotes inside.
@@ -53,13 +63,9 @@ fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-async fn run_npm(args: &str) -> CommandResponse {
-    info!("npm {}", args);
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(format!("npm {args}"))
-        .output()
-        .await;
+async fn run_command(cmd: &str) -> CommandResponse {
+    info!("{}", cmd);
+    let output = Command::new("sh").arg("-c").arg(cmd).output().await;
 
     match output {
         Err(e) => CommandResponse {

@@ -1,6 +1,6 @@
 //! Shared TUI state updated from the server.
 
-use hive_core::types::{Agent, Task};
+use hive_core::types::{Agent, Comment, Task};
 
 /// Lightweight task summary for display.
 #[derive(Default, Clone)]
@@ -9,6 +9,8 @@ pub struct TaskSummary {
     pub title: String,
     pub status: String,
     pub assigned: Option<String>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
 }
 
 impl From<&Task> for TaskSummary {
@@ -18,6 +20,8 @@ impl From<&Task> for TaskSummary {
             title: t.title.clone(),
             status: format!("{:?}", t.status).to_lowercase().replace('"', ""),
             assigned: t.assigned_agent_id.clone(),
+            description: t.description.clone(),
+            tags: t.tags.clone(),
         }
     }
 }
@@ -38,4 +42,7 @@ pub struct AppState {
     pub selected_task_idx: usize,
     pub topics: Vec<TopicSummary>,
     pub selected_topic_idx: usize,
+    pub selected_agent_idx: usize,
+    pub topic_detail_id: Option<String>,
+    pub topic_comments: Vec<Comment>,
 }

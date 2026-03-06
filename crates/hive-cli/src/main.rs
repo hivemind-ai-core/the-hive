@@ -70,6 +70,8 @@ enum Commands {
     },
     /// Open the TUI monitor
     Ui,
+    /// Install (or reinstall) companion binaries and Docker templates into ~/.hive/
+    Install,
     /// Check for and apply updates from GitHub releases
     Update {
         /// Only check the latest version without downloading
@@ -159,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
             let server_url = format!("ws://localhost:{}/ws", cfg.server.host_port);
             tui::app::run(server_url, args.directory.clone(), cfg)?;
         }
+        Commands::Install => updater::run(false).await?,
         Commands::Update { check } => updater::run(check).await?,
         Commands::Auth { action } => match action {
             AuthAction::Status => commands::auth_status(&args.directory)?,

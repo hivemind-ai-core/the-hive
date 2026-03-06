@@ -10,7 +10,7 @@ use crate::{communication as db_comm, db::DbPool};
 
 #[derive(Deserialize)]
 struct RegisterParams {
-    agent_id: String,
+    id: String,
     name: String,
     #[serde(default)]
     tags: Vec<String>,
@@ -23,13 +23,13 @@ pub fn list(pool: &DbPool) -> Result<Value> {
 
 pub fn register(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let p: RegisterParams = serde_json::from_value(params.unwrap_or(Value::Null))?;
-    if p.agent_id.trim().is_empty() {
-        anyhow::bail!("agent_id must not be empty");
+    if p.id.trim().is_empty() {
+        anyhow::bail!("id must not be empty");
     }
 
     let now = Utc::now();
     let agent = Agent {
-        id: p.agent_id,
+        id: p.id,
         name: p.name,
         tags: p.tags,
         connected_at: Some(now),

@@ -103,12 +103,14 @@ pub fn get_next(pool: &DbPool, agent_id: &str, tag: Option<&str>) -> Result<Opti
 
 /// Mark a task done and optionally store a result string.
 pub fn complete(pool: &DbPool, task_id: &str, result: Option<String>) -> Result<Task> {
-    let conn = pool.get()?;
-    conn.execute(
-        "UPDATE tasks SET status='done', result=?2, updated_at=datetime('now') WHERE id=?1",
-        rusqlite::params![task_id, result],
-    )
-    .context("completing task")?;
+    {
+        let conn = pool.get()?;
+        conn.execute(
+            "UPDATE tasks SET status='done', result=?2, updated_at=datetime('now') WHERE id=?1",
+            rusqlite::params![task_id, result],
+        )
+        .context("completing task")?;
+    } // release lock before calling get_task
 
     get_task(pool, task_id)?
         .ok_or_else(|| anyhow::anyhow!("task not found after complete"))

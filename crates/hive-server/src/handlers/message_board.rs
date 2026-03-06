@@ -55,25 +55,26 @@ pub fn comment(pool: &DbPool, params: Option<Value>) -> Result<Value> {
 
 /// Wait until the comment count for a topic exceeds `since_count`.
 /// Polls every second up to `timeout_secs` (default 30).
-pub fn wait(pool: &DbPool, params: Option<Value>) -> Result<Value> {
+pub async fn wait(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let p = params.unwrap_or(Value::Null);
     let id = p.get("id").and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("params.id is required"))?;
+        .ok_or_else(|| anyhow::anyhow!("params.id is required"))?
+        .to_string();
     let since_count = p.get("since_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     let timeout_secs = p.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(30);
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
     loop {
-        let comments = db_mb::get_comments(pool, id)?;
+        let comments = db_mb::get_comments(pool, &id)?;
         if comments.len() > since_count {
-            let topic = db_mb::get_topic(pool, id)?
+            let topic = db_mb::get_topic(pool, &id)?
                 .ok_or_else(|| anyhow::anyhow!("topic not found"))?;
             return Ok(serde_json::json!({ "topic": topic, "comments": comments }));
         }
-        if std::time::Instant::now() >= deadline {
+        if tokio::time::Instant::now() >= deadline {
             anyhow::bail!("timeout waiting for new comments");
         }
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 

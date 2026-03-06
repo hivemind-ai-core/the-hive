@@ -1,7 +1,6 @@
 //! HTTP + WebSocket server: /health for Docker healthcheck, /ws for agents.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
 
 use anyhow::Result;
 use axum::{
@@ -17,16 +16,16 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 use tracing::{info, warn};
 
-use crate::{communication, handlers, state::AppState, tasks as db_tasks};
+use crate::{communication, handlers, message_board as db_mb, state::AppState, tasks as db_tasks};
 
-/// Start the HTTP + WebSocket server. Runs forever.
-pub async fn serve(addr: SocketAddr, state: AppState) -> Result<()> {
+/// Start the HTTP + WebSocket server on an already-bound listener. Runs forever.
+pub async fn serve(listener: TcpListener, state: AppState) -> Result<()> {
+    let addr = listener.local_addr()?;
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/ws", get(ws_handler))
         .with_state(state);
 
-    let listener = TcpListener::bind(addr).await?;
     info!("HTTP+WebSocket server listening on {addr}");
 
     axum::serve(listener, app).await?;
@@ -120,7 +119,7 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
         "task.get"    => handle(&msg.id, handlers::tasks::get(&state.db, msg.params)),
         "task.update"    => handle(&msg.id, handlers::tasks::update(&state.db, msg.params)),
         "task.get_next"      => handle(&msg.id, handlers::tasks::get_next(&state.db, agent_id, msg.params)),
-        "task.complete"      => handle(&msg.id, handlers::tasks::complete(&state.db, msg.params)),
+        "task.complete"      => handle(&msg.id, handlers::tasks::complete(&state.db, agent_id, msg.params)),
         "task.split"         => handle(&msg.id, handlers::tasks::split(&state.db, msg.params)),
         "task.set_dependency"=> handle(&msg.id, handlers::tasks::set_dependency(&state.db, msg.params)),
         "topic.create"  => handle(&msg.id, handlers::message_board::create(&state.db, msg.params)),
@@ -128,7 +127,7 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
         "topic.list_new" => handle(&msg.id, handlers::message_board::list_new(&state.db, msg.params)),
         "topic.get"     => handle(&msg.id, handlers::message_board::get(&state.db, msg.params)),
         "topic.comment" => handle(&msg.id, handlers::message_board::comment(&state.db, msg.params)),
-        "topic.wait"    => handle(&msg.id, handlers::message_board::wait(&state.db, msg.params)),
+        "topic.wait"    => handle(&msg.id, handlers::message_board::wait(&state.db, msg.params).await),
         "agent.register" => handle(&msg.id, handlers::agents::register(&state.db, msg.params)),
         "agent.list"     => handle(&msg.id, handlers::agents::list(&state.db)),
         "push.send" => handle(
@@ -146,6 +145,7 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
             "task.create" | "task.update" | "task.complete" | "task.split"
             | "task.get_next" | "task.set_dependency" => broadcast_tasks(state),
             "agent.register" => broadcast_agents(state),
+            "topic.create" | "topic.comment" => broadcast_topics(state),
             _ => {}
         }
     }
@@ -231,6 +231,16 @@ fn broadcast_tasks(state: &AppState) {
             Err(e) => warn!("broadcast_tasks serialize error: {e}"),
         },
         Err(e) => warn!("broadcast_tasks query error: {e}"),
+    }
+}
+
+fn broadcast_topics(state: &AppState) {
+    match db_mb::list_topics(&state.db) {
+        Ok(topics) => match serde_json::to_value(&topics) {
+            Ok(v) => broadcast("topics.updated", v, state),
+            Err(e) => warn!("broadcast_topics serialize error: {e}"),
+        },
+        Err(e) => warn!("broadcast_topics query error: {e}"),
     }
 }
 
