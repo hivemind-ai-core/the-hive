@@ -2,7 +2,6 @@
 
 pub mod agents;
 pub mod app;
-pub mod auth;
 pub mod exec;
 pub mod logging;
 pub mod review;

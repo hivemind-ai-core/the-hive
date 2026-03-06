@@ -96,6 +96,7 @@ impl Agent {
                     Some(r.output)
                 }
                 Err(e) => {
+                    warn!("Executor error for task {}: {e}", task.id);
                     crate::session::clear(&agent_id);
                     Some(format!("error: {e}"))
                 }

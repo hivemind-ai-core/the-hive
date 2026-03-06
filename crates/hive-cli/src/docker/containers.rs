@@ -274,23 +274,14 @@ async fn create_agent_container(
     ];
 
     // Auto-mount credential directories for known coding agents.
-    // Only mounted if the source directory exists on the host.
+    // Skipped for synced agents — credentials are injected via env vars instead.
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-    let cred_mounts: &[(&str, &str)] = match agent.coding_agent.as_str() {
-        "claude" => &[(".claude", "/home/agent/.claude")],
-        _        => &[],
-    };
-    for (src_name, container_path) in cred_mounts {
-        let src = std::path::Path::new(&home).join(src_name);
-        if src.exists() {
-            binds.push(format!("{}:{container_path}", src.display()));
+    if agent.coding_agent == "claude" && agent.auth != "synced" {
+        let cred_dir = std::path::Path::new(&home).join(".claude");
+        if cred_dir.exists() {
+            binds.push(format!("{}:/home/agent/.claude", cred_dir.display()));
         }
-    }
-
-    // Mount claude.json credentials → /home/agent/.claude.json.
-    // Prefers per-agent .hive/claude-{name}.json over shared .hive/claude.json.
-    // Written by `hive auth sync` or `hive auth login`.
-    if agent.coding_agent == "claude" {
+        // Also mount .hive/claude-{name}.json or .hive/claude.json if present.
         let per_agent_claude = std::path::Path::new(hive_dir).join(format!("claude-{}.json", agent.name));
         let shared_claude = std::path::Path::new(hive_dir).join("claude.json");
         let claude_json = if per_agent_claude.exists() { &per_agent_claude } else { &shared_claude };

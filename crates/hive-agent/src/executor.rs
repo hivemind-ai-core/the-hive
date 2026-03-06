@@ -189,6 +189,7 @@ pub async fn run(
             (exit_code, combined)
         }
         Ok(Err(e)) => {
+            warn!("Failed to spawn '{agent_bin}': {e}");
             return Err(e).with_context(|| format!("spawning '{agent_bin}'"));
         }
         Err(_) => {

@@ -34,3 +34,7 @@ mcp.json
 .mcp.json
 .hive/hive.db
 .hive/bin/
+.hive/.env
+.hive/claude.json
+.hive/agents/
+.hive/kilocode/

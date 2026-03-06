@@ -157,7 +157,8 @@ pub fn list_tasks(
         conditions.push("assigned_agent_id = ?");
     }
     if tag.is_some() {
-        conditions.push("EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)");
+        // Match tasks that either have no tags (claimable by any agent) OR have the specific tag.
+        conditions.push("(tags = '[]' OR tags IS NULL OR tags = '' OR EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?))");
     }
 
     let where_clause = if conditions.is_empty() {

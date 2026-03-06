@@ -11,7 +11,6 @@ pub enum WizardScreen {
     App,
     Exec,
     Logging,
-    Auth,
     Review,
 }
 
@@ -22,7 +21,6 @@ impl WizardScreen {
         WizardScreen::App,
         WizardScreen::Exec,
         WizardScreen::Logging,
-        WizardScreen::Auth,
         WizardScreen::Review,
     ];
 
@@ -32,8 +30,7 @@ impl WizardScreen {
             Self::Agents  => Self::App,
             Self::App     => Self::Exec,
             Self::Exec    => Self::Logging,
-            Self::Logging => Self::Auth,
-            Self::Auth    => Self::Review,
+            Self::Logging => Self::Review,
             Self::Review  => Self::Review,
         }
     }
@@ -45,8 +42,7 @@ impl WizardScreen {
             Self::App     => Self::Agents,
             Self::Exec    => Self::App,
             Self::Logging => Self::Exec,
-            Self::Auth    => Self::Logging,
-            Self::Review  => Self::Auth,
+            Self::Review  => Self::Logging,
         }
     }
 
@@ -57,7 +53,6 @@ impl WizardScreen {
             Self::App     => "App",
             Self::Exec    => "Exec",
             Self::Logging => "Logging",
-            Self::Auth    => "Auth",
             Self::Review  => "Review",
         }
     }
@@ -69,8 +64,7 @@ impl WizardScreen {
             Self::App     => 2,
             Self::Exec    => 3,
             Self::Logging => 4,
-            Self::Auth    => 5,
-            Self::Review  => 6,
+            Self::Review  => 5,
         }
     }
 }
@@ -98,7 +92,8 @@ pub struct ConfigWizardState {
     pub agent_edit: Option<usize>,
     /// Agents screen: which field within the agent edit form is focused.
     pub agent_subfield: usize,
-    /// Project directory, used by the Agents screen to write per-agent configs.
+    /// Project directory, available to screens for config path resolution.
+    #[allow(dead_code)]
     pub project_dir: PathBuf,
     /// Kilo provider selection: available provider IDs loaded from ~/.kilocode/cli/config.json.
     pub kilo_providers: Vec<String>,

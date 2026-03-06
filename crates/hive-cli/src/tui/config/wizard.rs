@@ -46,7 +46,6 @@ pub fn run(config: Config, project_dir: PathBuf) -> Result<Config> {
                 WizardScreen::App     => screens::app::render(f, chunks[1], &state),
                 WizardScreen::Exec    => screens::exec::render(f, chunks[1], &state),
                 WizardScreen::Logging => screens::logging::render(f, chunks[1], &state),
-                WizardScreen::Auth    => screens::auth::render(f, chunks[1], &state),
                 WizardScreen::Review  => screens::review::render(f, chunks[1], &state),
             }
             screens::render_footer(f, chunks[2], &state);
@@ -70,7 +69,6 @@ pub fn run(config: Config, project_dir: PathBuf) -> Result<Config> {
             WizardScreen::App     => screens::app::handle(code, modifiers, &mut state),
             WizardScreen::Exec    => screens::exec::handle(code, modifiers, &mut state),
             WizardScreen::Logging => screens::logging::handle(code, modifiers, &mut state),
-            WizardScreen::Auth    => screens::auth::handle(code, modifiers, &mut state),
             WizardScreen::Review  => screens::review::handle(code, modifiers, &mut state),
         };
 

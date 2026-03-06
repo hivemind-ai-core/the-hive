@@ -39,6 +39,7 @@ pub fn run(project_dir: &Path) -> Result<()> {
             seed.agents.push(Agent {
                 name: "kilo-1".to_string(),
                 coding_agent: "kilo".to_string(),
+                auth: "none".to_string(),
                 tags: vec![],
                 env: Default::default(),
             });

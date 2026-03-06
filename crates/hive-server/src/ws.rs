@@ -147,8 +147,15 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
     if response.error.is_none() {
         match method {
             "task.create" | "task.update" | "task.complete" | "task.split"
-            | "task.get_next" | "task.set_dependency" => broadcast_tasks(state),
-            "agent.register" => broadcast_agents(state),
+            | "task.set_dependency" => broadcast_tasks(state),
+            // Only broadcast when task.get_next actually claimed a task (non-null result).
+            // Polling with no available task must not spam all clients.
+            "task.get_next" => {
+                if response.result.as_ref().map(|v| !v.is_null()).unwrap_or(false) {
+                    broadcast_tasks(state);
+                }
+            }
+            "agent.register" | "agent.heartbeat" => broadcast_agents(state),
             "topic.create" | "topic.comment" => broadcast_topics(state),
             _ => {}
         }

@@ -43,6 +43,9 @@ pub struct Agent {
     /// Tags assigned to this agent.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// How the agent's credentials are configured: "none" | "synced" | "api_key".
+    #[serde(default)]
+    pub auth: String,
     /// Extra environment variables passed to this agent's container.
     /// Merged on top of any project-wide .hive/.env values.
     #[serde(default)]

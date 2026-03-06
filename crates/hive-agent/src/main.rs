@@ -22,6 +22,9 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Hive Agent starting...");
 
+    apply_kilo_auth();
+    apply_claude_auth();
+
     let agent_id = std::env::var("HIVE_AGENT_ID").expect("HIVE_AGENT_ID is required");
     let server_url = std::env::var("HIVE_SERVER_URL").expect("HIVE_SERVER_URL is required");
     let app_daemon_url = std::env::var("HIVE_APP_DAEMON_URL").expect("HIVE_APP_DAEMON_URL is required");
@@ -62,11 +65,18 @@ async fn main() -> anyhow::Result<()> {
     let agent = Agent::new(agent_id, agent_tags, coding_agent, cmd_tx.clone(), pending);
     agent.spawn_polling();
 
-    // Log incoming push messages so they're visible in `hive logs`.
+    // Log incoming agent-to-agent push messages so they're visible in `hive logs`.
+    // Server-wide broadcast updates (tasks.updated, agents.updated, topics.updated)
+    // are suppressed at INFO to avoid log spam.
     tokio::spawn(async move {
         while let Some(msg) = push_rx.recv().await {
+            let method = msg.method.as_deref().unwrap_or("");
+            if matches!(method, "tasks.updated" | "agents.updated" | "topics.updated") {
+                tracing::debug!("Server broadcast: {method}");
+                continue;
+            }
             if let Some(params) = msg.params {
-                info!("Push message received: {params}");
+                info!("Push message received [{method}]: {params}");
             }
         }
     });
@@ -76,6 +86,46 @@ async fn main() -> anyhow::Result<()> {
     info!("Shutting down");
 
     Ok(())
+}
+
+/// If `KILO_PROVIDER_JSON` is set in the environment, write it to
+/// `$HOME/.kilocode/cli/config.json` so the kilo CLI picks it up.
+fn apply_kilo_auth() {
+    let Ok(json_str) = std::env::var("KILO_PROVIDER_JSON") else { return };
+    if json_str.is_empty() { return }
+    let home = match std::env::var("HOME").ok().map(std::path::PathBuf::from) {
+        Some(p) => p,
+        None => { tracing::warn!("KILO_PROVIDER_JSON set but HOME is unset — skipping"); return }
+    };
+    let dst = home.join(".kilocode/cli/config.json");
+    if let Some(parent) = dst.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::warn!("Failed to create ~/.kilocode/cli: {e}");
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(&dst, &json_str) {
+        tracing::warn!("Failed to write kilo provider config: {e}");
+    } else {
+        info!("Kilo provider config written to {}", dst.display());
+    }
+}
+
+/// If `CLAUDE_AUTH_JSON` is set in the environment, write it to
+/// `$HOME/.claude.json` so the claude CLI picks it up.
+fn apply_claude_auth() {
+    let Ok(json_str) = std::env::var("CLAUDE_AUTH_JSON") else { return };
+    if json_str.is_empty() { return }
+    let home = match std::env::var("HOME").ok().map(std::path::PathBuf::from) {
+        Some(p) => p,
+        None => { tracing::warn!("CLAUDE_AUTH_JSON set but HOME is unset — skipping"); return }
+    };
+    let dst = home.join(".claude.json");
+    if let Err(e) = std::fs::write(&dst, &json_str) {
+        tracing::warn!("Failed to write claude auth: {e}");
+    } else {
+        info!("Claude auth written to {}", dst.display());
+    }
 }
 
 fn start_mcp_server(agent_id: &str, app_daemon_url: &str, cmd_tx: tokio::sync::mpsc::UnboundedSender<client::ClientCmd>, pending: client::PendingRequests) {
