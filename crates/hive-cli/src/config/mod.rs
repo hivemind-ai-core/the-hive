@@ -115,7 +115,7 @@ impl Default for Config {
 
 impl Default for NetworkConfig {
     fn default() -> Self {
-        Self { isolate: true }
+        Self { isolate: false }
     }
 }
 
