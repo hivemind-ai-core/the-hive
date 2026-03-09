@@ -75,33 +75,6 @@ fn write_mcp_configs(mcp_port: u16) {
     }
 }
 
-/// Execute the coding agent with only push messages (no task context).
-///
-/// Used when an agent is idle and receives push messages from another agent or operator.
-pub async fn run_push_only(
-    agent_bin: &str,
-    agent_id: &str,
-    messages: &[PushMessage],
-) -> Result<ExecutionResult> {
-    use hive_core::types::TaskStatus;
-
-    let task = Task {
-        id: "push-only".to_string(),
-        title: "Respond to incoming messages".to_string(),
-        description: Some(
-            "You have received direct messages while idle. Respond or take action as appropriate.".to_string()
-        ),
-        status: TaskStatus::InProgress,
-        assigned_agent_id: Some(agent_id.to_string()),
-        tags: vec![],
-        result: None,
-        position: 0,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
-    run(&task, agent_bin, agent_id, messages).await
-}
-
 /// Execute the coding agent with the given task and any pending push messages.
 ///
 /// `agent_bin` is the agent executable name (`kilo`, `claude`, etc.).

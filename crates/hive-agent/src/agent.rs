@@ -1,58 +1,57 @@
-//! Agent struct: owns the polling loop and task execution lifecycle.
+//! Agent struct: owns task execution lifecycle.
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, Ordering},
+};
 
 use hive_core::types::{PushMessage, Task};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{info, warn};
 
 use crate::client::{self, ClientCmd, PendingRequests};
+use crate::status::{self, LastStatus};
 
-/// Shared agent state passed into closures and spawned tasks.
+/// Shared agent state. Clone-safe: all fields are either Arc or Clone.
+#[derive(Clone)]
 pub struct Agent {
     pub agent_id: Arc<String>,
-    pub agent_tags: Vec<String>,
     pub coding_agent: Arc<String>,
     pub cmd_tx: UnboundedSender<ClientCmd>,
     pub pending: PendingRequests,
+    pub active_tasks: Arc<AtomicU8>,
+    pub last_status: LastStatus,
 }
 
 impl Agent {
     pub fn new(
         agent_id: String,
-        agent_tags: Vec<String>,
         coding_agent: String,
         cmd_tx: UnboundedSender<ClientCmd>,
         pending: PendingRequests,
+        last_status: LastStatus,
     ) -> Self {
         Self {
             agent_id: Arc::new(agent_id),
-            agent_tags,
             coding_agent: Arc::new(coding_agent),
             cmd_tx,
             pending,
+            active_tasks: Arc::new(AtomicU8::new(0)),
+            last_status,
         }
     }
 
-    /// Spawn the polling loop. Returns immediately; runs in background.
-    pub fn spawn_polling(&self) {
-        let agent_id = Arc::clone(&self.agent_id);
-        let agent_tags = self.agent_tags.clone();
-        let cmd_tx = self.cmd_tx.clone();
-        let pending = self.pending.clone();
-        let coding_agent = Arc::clone(&self.coding_agent);
-
-        tokio::spawn(async move {
-            crate::polling::run(
-                (*agent_id).clone(),
-                agent_tags,
-                (*coding_agent).clone(),
-                cmd_tx.clone(),
-                pending.clone(),
-                move |task| Self::spawn_task(task, Arc::clone(&agent_id), Arc::clone(&coding_agent), cmd_tx.clone(), pending.clone()),
-            )
-            .await;
-        });
+    /// Called when the server pushes `task.assign { task }`. Spawns execution.
+    pub fn on_task_assign(&self, task: Task) {
+        Self::spawn_task(
+            task,
+            Arc::clone(&self.agent_id),
+            Arc::clone(&self.coding_agent),
+            self.cmd_tx.clone(),
+            self.pending.clone(),
+            Arc::clone(&self.active_tasks),
+            self.last_status.clone(),
+        );
     }
 
     fn spawn_task(
@@ -61,20 +60,27 @@ impl Agent {
         coding_agent: Arc<String>,
         cmd_tx: UnboundedSender<ClientCmd>,
         pending: PendingRequests,
+        active_tasks: Arc<AtomicU8>,
+        last_status: LastStatus,
     ) {
         tokio::spawn(async move {
             info!("Running task: {} ({})", task.title, task.id);
 
-            // Fetch undelivered push messages before starting the task.
+            // Report busy immediately.
+            let n = active_tasks.fetch_add(1, Ordering::SeqCst) + 1;
+            status::report(&cmd_tx, n, &last_status);
+
+            // Fetch any undelivered push messages so they're included in the prompt.
             let push_req = client::request(
                 "push.list",
                 Some(serde_json::json!({ "agent_id": *agent_id })),
             );
             let message_ids: Vec<String>;
             let messages: Vec<PushMessage> =
-                match crate::polling::send_request(&cmd_tx, &pending, push_req).await {
+                match client::send_request(&cmd_tx, &pending, push_req).await {
                     Some(resp) => {
-                        let msgs: Vec<PushMessage> = resp.result
+                        let msgs: Vec<PushMessage> = resp
+                            .result
                             .and_then(|v| serde_json::from_value(v).ok())
                             .unwrap_or_default();
                         message_ids = msgs.iter().map(|m| m.id.clone()).collect();
@@ -102,7 +108,7 @@ impl Agent {
                 }
             };
 
-            // Acknowledge the push messages that were included in the prompt.
+            // Acknowledge push messages included in the prompt.
             if !message_ids.is_empty() {
                 let ack_req = client::request(
                     "push.ack",
@@ -120,6 +126,10 @@ impl Agent {
             if let Err(e) = cmd_tx.send(ClientCmd::Send(complete_req)) {
                 warn!("Failed to send task.complete for {}: {e}", task.id);
             }
+
+            // Report idle after completing.
+            let n = active_tasks.fetch_sub(1, Ordering::SeqCst) - 1;
+            status::report(&cmd_tx, n, &last_status);
         });
     }
 }

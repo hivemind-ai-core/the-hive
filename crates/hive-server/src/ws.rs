@@ -1,7 +1,5 @@
 //! HTTP + WebSocket server: /health for Docker healthcheck, /ws for agents.
 
-use std::collections::HashMap;
-
 use anyhow::Result;
 use axum::{
     Router,
@@ -9,14 +7,23 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
+use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use hive_core::types::{ApiError, ApiMessage, MessageType};
+use std::collections::HashMap;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use uuid::Uuid;
 use tracing::{info, warn};
+use uuid::Uuid;
 
-use crate::{communication, handlers, message_board as db_mb, state::AppState, tasks as db_tasks};
+use crate::{
+    agent_registry::{self, AgentState},
+    communication,
+    handlers,
+    message_board as db_mb,
+    state::AppState,
+    tasks as db_tasks,
+};
 
 /// Start the HTTP + WebSocket server on an already-bound listener. Runs forever.
 pub async fn serve(listener: TcpListener, state: AppState) -> Result<()> {
@@ -55,11 +62,21 @@ async fn handle_connection(socket: WebSocket, agent_id: String, state: AppState)
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
-    match state.clients.lock() {
-        Ok(mut clients) => { clients.insert(agent_id.clone(), tx); }
-        Err(e) => {
-            warn!("Client lock poisoned on connect for '{agent_id}': {e}");
-            return;
+    // Register in the agent registry with defaults — agent.register will set real values.
+    // registered=false: try_dispatch won't dispatch to this agent until agent.register
+    // is processed, preserving backward compat with agents that use task.get_next.
+    {
+        let entry = AgentState {
+            id: agent_id.clone(),
+            tags: vec![],
+            capacity_max: 1,
+            active_tasks: 0,
+            last_seen_at: Utc::now(),
+            ws_tx: tx,
+            registered: false,
+        };
+        if let Ok(mut agents) = state.agents.lock() {
+            agents.insert(agent_id.clone(), entry);
         }
     }
 
@@ -86,14 +103,27 @@ async fn handle_connection(socket: WebSocket, agent_id: String, state: AppState)
     }
 
     send_task.abort();
-    match state.clients.lock() {
-        Ok(mut clients) => { clients.remove(&agent_id); }
-        Err(e) => warn!("Client lock poisoned on disconnect for '{agent_id}': {e}"),
+
+    // On disconnect: reset any in-progress tasks assigned to this agent.
+    match db_tasks::reset_in_progress_for_agent(&state.db, &agent_id) {
+        Ok(n) if n > 0 => {
+            info!("Agent '{agent_id}' disconnected: reset {n} in-progress task(s) to pending");
+            broadcast_tasks(&state);
+        }
+        Ok(_) => {}
+        Err(e) => warn!("Failed to reset tasks for '{agent_id}' on disconnect: {e}"),
     }
-    // Mark agent as disconnected in the DB.
-    if let Err(e) = crate::communication::touch_agent(&state.db, &agent_id) {
+
+    // Remove from registry.
+    if let Ok(mut agents) = state.agents.lock() {
+        agents.remove(&agent_id);
+    }
+
+    // Update last_seen_at in DB.
+    if let Err(e) = communication::touch_agent(&state.db, &agent_id) {
         warn!("Failed to update agent last_seen on disconnect: {e}");
     }
+
     info!("Agent '{agent_id}' disconnected");
     broadcast_agents(&state);
 }
@@ -128,15 +158,16 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
         "topic.get"     => handle(&msg.id, handlers::message_board::get(&state.db, msg.params)),
         "topic.comment" => handle(&msg.id, handlers::message_board::comment(&state.db, msg.params)),
         "topic.wait"    => handle(&msg.id, handlers::message_board::wait(&state.db, msg.params).await),
-        "agent.register"  => handle(&msg.id, handlers::agents::register(&state.db, msg.params)),
+        "agent.register"  => handle(&msg.id, handlers::agents::register(&state.db, &state.agents, msg.params)),
         "agent.list"      => handle(&msg.id, handlers::agents::list(&state.db)),
+        "agent.status"    => handle(&msg.id, handlers::agents::status(&state.agents, &state.db, agent_id, msg.params)),
         "agent.heartbeat" => handle(&msg.id,
             communication::touch_agent(&state.db, agent_id)
                 .map(|_| serde_json::json!({ "ok": true }))
         ),
         "push.send" => handle(
             &msg.id,
-            handlers::push::send(&state.db, &state.clients, agent_id, msg.params),
+            handlers::push::send(&state.db, &state.agents, agent_id, msg.params),
         ),
         "push.list" => handle(&msg.id, handlers::push::list(&state.db, agent_id)),
         "push.ack"  => handle(&msg.id, handlers::push::ack(&state.db, msg.params)),
@@ -148,32 +179,34 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
         match method {
             "task.create" | "task.update" | "task.complete" | "task.split"
             | "task.set_dependency" => broadcast_tasks(state),
-            // Only broadcast when task.get_next actually claimed a task (non-null result).
-            // Polling with no available task must not spam all clients.
             "task.get_next" => {
                 if response.result.as_ref().map(|v| !v.is_null()).unwrap_or(false) {
                     broadcast_tasks(state);
                 }
             }
-            "agent.register" | "agent.heartbeat" => broadcast_agents(state),
+            "agent.register" | "agent.heartbeat" | "agent.status" => broadcast_agents(state),
             "topic.create" | "topic.comment" => broadcast_topics(state),
             _ => {}
         }
     }
 
-    send_to(agent_id, response, state);
-}
+    // Send response first so task.assign push (if any) arrives after the response.
+    agent_registry::send_to_agent(&state.agents, agent_id, &response);
 
-fn send_to(agent_id: &str, msg: ApiMessage, state: &AppState) {
-    match state.clients.lock() {
-        Ok(clients) => {
-            if let Some(tx) = clients.get(agent_id) {
-                if let Ok(json) = serde_json::to_string(&msg) {
-                    let _ = tx.send(Message::Text(json.into()));
-                }
+    // Post-send dispatch triggers (must be after send_to_agent so the response
+    // reaches the agent before any task.assign push message).
+    if response.error.is_none() {
+        match method {
+            // agent.register: agent just became eligible for dispatch.
+            // agent.status: agent reported new active_tasks count; may have capacity.
+            // task.create | task.split: new tasks available for idle agents.
+            "agent.register" | "agent.status" | "task.create" | "task.split" => {
+                agent_registry::try_dispatch(&state.agents, &state.db);
             }
+            // task.complete: agent will send agent.status { active_tasks: N } shortly,
+            // which triggers dispatch. No eager dispatch here.
+            _ => {}
         }
-        Err(e) => warn!("Client lock poisoned in send_to '{agent_id}': {e}"),
     }
 }
 
@@ -226,13 +259,7 @@ fn broadcast(method: &str, payload: serde_json::Value, state: &AppState) {
         result: None,
         error: None,
     };
-    if let Ok(json) = serde_json::to_string(&msg) {
-        if let Ok(clients) = state.clients.lock() {
-            for tx in clients.values() {
-                let _ = tx.send(Message::Text(json.clone().into()));
-            }
-        }
-    }
+    agent_registry::broadcast_all(&state.agents, &msg);
 }
 
 fn broadcast_tasks(state: &AppState) {
@@ -264,4 +291,3 @@ fn broadcast_agents(state: &AppState) {
         Err(e) => warn!("broadcast_agents query error: {e}"),
     }
 }
-

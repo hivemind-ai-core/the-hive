@@ -9,9 +9,10 @@ mod agent;
 mod client;
 mod executor;
 mod mcp;
-mod polling;
 mod session;
+mod status;
 
+use hive_core::types::Task;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -50,38 +51,48 @@ async fn main() -> anyhow::Result<()> {
 
     let (cmd_tx, pending, mut push_rx) = client::start(server_url, agent_id.clone(), agent_name, agent_tags.clone());
 
-    // Heartbeat: update last_seen_at every 30 seconds.
-    {
-        let hb_tx = cmd_tx.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                let msg = client::request("agent.heartbeat", None);
-                if hb_tx.send(client::ClientCmd::Send(msg)).is_err() {
-                    break;
-                }
-                tracing::debug!("heartbeat sent");
-            }
-        });
-    }
+    let last_status = status::new_last_status();
+
+    // Report initial idle status.
+    status::report(&cmd_tx, 0, &last_status);
+
+    // Watchdog: send agent.heartbeat if no status has been sent for 30s.
+    status::spawn_watchdog(cmd_tx.clone(), last_status.clone());
 
     start_mcp_server(&agent_id, &app_daemon_url, cmd_tx.clone(), pending.clone());
 
-    let agent = Agent::new(agent_id, agent_tags, coding_agent, cmd_tx.clone(), pending);
-    agent.spawn_polling();
+    let agent = Agent::new(agent_id, coding_agent, cmd_tx.clone(), pending, last_status);
 
-    // Log incoming agent-to-agent push messages so they're visible in `hive logs`.
-    // Server-wide broadcast updates (tasks.updated, agents.updated, topics.updated)
-    // are suppressed at INFO to avoid log spam.
+    // Route incoming push messages: task.assign drives task execution;
+    // push.notify delivers agent-to-agent messages; broadcasts are debug-logged.
     tokio::spawn(async move {
         while let Some(msg) = push_rx.recv().await {
             let method = msg.method.as_deref().unwrap_or("");
-            if matches!(method, "tasks.updated" | "agents.updated" | "topics.updated") {
-                tracing::debug!("Server broadcast: {method}");
-                continue;
-            }
-            if let Some(params) = msg.params {
-                info!("Push message received [{method}]: {params}");
+            match method {
+                "task.assign" => {
+                    if let Some(params) = msg.params {
+                        match serde_json::from_value::<Task>(params["task"].clone()) {
+                            Ok(task) => {
+                                info!("Task assigned: {} ({})", task.title, task.id);
+                                agent.on_task_assign(task);
+                            }
+                            Err(e) => tracing::warn!("Failed to parse task.assign payload: {e}"),
+                        }
+                    }
+                }
+                "push.notify" => {
+                    if let Some(params) = &msg.params {
+                        info!("Push notification received: {params}");
+                    }
+                }
+                "tasks.updated" | "agents.updated" | "topics.updated" => {
+                    tracing::debug!("Server broadcast: {method}");
+                }
+                _ => {
+                    if let Some(params) = msg.params {
+                        info!("Push message [{method}]: {params}");
+                    }
+                }
             }
         }
     });

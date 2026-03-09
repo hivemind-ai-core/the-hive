@@ -13,6 +13,8 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Commands sent from the agent logic to the client task.
 pub enum ClientCmd {
     Send(ApiMessage),
@@ -87,6 +89,7 @@ async fn run_loop(
                         "id": agent_id,
                         "name": agent_name,
                         "tags": agent_tags,
+                        "capacity_max": 1,
                     })),
                 );
                 if let Ok(json) = serde_json::to_string(&reg) {
@@ -174,5 +177,35 @@ pub fn request(method: &str, params: Option<serde_json::Value>) -> ApiMessage {
         params,
         result: None,
         error: None,
+    }
+}
+
+/// Register a pending oneshot, send the request, and await the response with a
+/// 30-second timeout. Returns `None` on channel close or timeout.
+pub async fn send_request(
+    cmd_tx: &UnboundedSender<ClientCmd>,
+    pending: &PendingRequests,
+    msg: ApiMessage,
+) -> Option<ApiMessage> {
+    let (tx, rx) = oneshot::channel();
+
+    // Register before sending to avoid a race where the response arrives first.
+    if let Ok(mut map) = pending.lock() {
+        map.insert(msg.id.clone(), tx);
+    } else {
+        return None;
+    }
+
+    if cmd_tx.send(ClientCmd::Send(msg)).is_err() {
+        return None;
+    }
+
+    match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+        Ok(Ok(response)) => Some(response),
+        Ok(Err(_)) => None, // sender dropped
+        Err(_) => {
+            warn!("Request timed out after {REQUEST_TIMEOUT:?}");
+            None
+        }
     }
 }

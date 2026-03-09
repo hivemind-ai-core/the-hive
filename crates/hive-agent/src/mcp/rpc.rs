@@ -7,7 +7,7 @@ use crate::mcp::server::McpState;
 
 /// Send `request` to the server and block until the matching response arrives.
 pub async fn call_server(state: &McpState, request: ApiMessage) -> Result<serde_json::Value> {
-    match crate::polling::send_request(&state.cmd_tx, &state.pending, request).await {
+    match crate::client::send_request(&state.cmd_tx, &state.pending, request).await {
         Some(response) => {
             if let Some(err) = response.error {
                 anyhow::bail!("{}", err.message);

@@ -1,30 +1,20 @@
 //! Shared application state.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
-use axum::extract::ws::Message;
-use tokio::sync::mpsc::UnboundedSender;
-
+use crate::agent_registry::{new_registry, AgentRegistry};
 use crate::db::DbPool;
-
-/// A handle to send WebSocket messages to a connected agent.
-pub type AgentSender = UnboundedSender<Message>;
-
-/// Live connected agents: agent_id → send channel.
-pub type Clients = Arc<Mutex<HashMap<String, AgentSender>>>;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: DbPool,
-    pub clients: Clients,
+    /// In-memory registry of connected agents and their state.
+    pub agents: AgentRegistry,
 }
 
 impl AppState {
     pub fn new(db: DbPool) -> Self {
         Self {
             db,
-            clients: Arc::new(Mutex::new(HashMap::new())),
+            agents: new_registry(),
         }
     }
 }

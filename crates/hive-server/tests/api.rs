@@ -784,7 +784,12 @@ async fn test_push_live_delivery_still_in_list_until_acked() {
         }
     ).await.expect("timed out waiting for push WS notification");
 
-    assert_eq!(push_received.params.unwrap()["content"], "live hello");
+    // push.notify wraps messages in a "messages" array.
+    let params = push_received.params.unwrap();
+    let content = params["messages"][0]["content"].as_str()
+        .or_else(|| params["content"].as_str()) // fallback for old push format
+        .expect("push notification should contain content");
+    assert_eq!(content, "live hello");
 
     // push.list still returns the message — only push.ack marks it delivered.
     let resp = call(&mut receiver, "push.list", serde_json::json!({})).await;
@@ -1349,6 +1354,142 @@ async fn test_task_list_combined_filter() {
     // status=in-progress + tag=frontend → 0
     let resp = call(&mut ws, "task.list", serde_json::json!({ "status": "in-progress", "tag": "frontend" })).await;
     assert_eq!(resp.result.unwrap().as_array().unwrap().len(), 0);
+}
+
+// ── v2 protocol: proactive dispatch tests ────────────────────────────────────
+
+#[tokio::test]
+async fn test_task_assign_on_register_when_task_pending() {
+    // Create a task BEFORE the agent registers.
+    // When the agent calls agent.register, the server should push task.assign.
+    let addr = start_server().await;
+    let mut creator = connect(addr, "creator").await;
+    let mut agent = connect(addr, "agent-1").await;
+
+    call(&mut creator, "task.create", serde_json::json!({ "title": "Dispatch me" })).await;
+
+    // Register the agent — server should immediately dispatch the pending task.
+    call(&mut agent, "agent.register", serde_json::json!({
+        "id": "agent-1", "name": "Agent 1", "tags": [], "capacity_max": 1
+    })).await;
+
+    // Agent should receive a task.assign push.
+    let assign = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            loop {
+                let raw = agent.next().await.unwrap().unwrap();
+                if let Message::Text(t) = raw {
+                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                    if msg.method.as_deref() == Some("task.assign") {
+                        return msg;
+                    }
+                }
+            }
+        }
+    ).await.expect("timed out waiting for task.assign");
+
+    let task = assign.params.unwrap()["task"].clone();
+    assert_eq!(task["title"], "Dispatch me");
+    assert_eq!(task["status"], "in-progress");
+    assert_eq!(task["assigned_agent_id"], "agent-1");
+}
+
+#[tokio::test]
+async fn test_task_assign_on_task_create_when_agent_idle() {
+    // Agent registers first (idle). Then a task is created.
+    // Server should push task.assign immediately on task creation.
+    let addr = start_server().await;
+    let mut creator = connect(addr, "creator").await;
+    let mut agent = connect(addr, "agent-1").await;
+
+    call(&mut agent, "agent.register", serde_json::json!({
+        "id": "agent-1", "name": "Agent 1", "tags": [], "capacity_max": 1
+    })).await;
+
+    // Small delay to ensure registration is processed.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    call(&mut creator, "task.create", serde_json::json!({ "title": "Instant dispatch" })).await;
+
+    // Agent should receive task.assign without polling.
+    let assign = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            loop {
+                let raw = agent.next().await.unwrap().unwrap();
+                if let Message::Text(t) = raw {
+                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                    if msg.method.as_deref() == Some("task.assign") {
+                        return msg;
+                    }
+                }
+            }
+        }
+    ).await.expect("timed out waiting for task.assign");
+
+    assert_eq!(assign.params.unwrap()["task"]["title"], "Instant dispatch");
+}
+
+#[tokio::test]
+async fn test_agent_status_idle_triggers_dispatch() {
+    // Agent registers, completes a task, then reports idle via agent.status.
+    // Server should dispatch the next pending task after the status update.
+    //
+    // Task 2 is created AFTER task.complete so that task.complete's embedded
+    // get_next does not claim it. The registry still shows active_tasks=1 until
+    // agent.status { active_tasks: 0 } is sent, which triggers dispatch.
+    let addr = start_server().await;
+    let mut creator = connect(addr, "creator").await;
+    let mut ws = connect(addr, "agent-1").await;
+
+    call(&mut ws, "agent.register", serde_json::json!({
+        "id": "agent-1", "name": "Agent 1", "tags": [], "capacity_max": 1
+    })).await;
+
+    // Task 1 is created and immediately dispatched to the idle agent.
+    call(&mut creator, "task.create", serde_json::json!({ "title": "Task 1" })).await;
+
+    // Receive task.assign for Task 1.
+    let assign1 = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            loop {
+                let raw = ws.next().await.unwrap().unwrap();
+                if let Message::Text(t) = raw {
+                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                    if msg.method.as_deref() == Some("task.assign") { return msg; }
+                }
+            }
+        }
+    ).await.expect("timed out waiting for first task.assign");
+
+    let task1_id = assign1.params.unwrap()["task"]["id"].as_str().unwrap().to_string();
+
+    // Complete Task 1 (no pending tasks yet, so next_task=null).
+    call(&mut ws, "task.complete", serde_json::json!({ "id": task1_id, "result": "ok" })).await;
+
+    // Create Task 2 now. Registry still has active_tasks=1, so try_dispatch won't fire.
+    call(&mut creator, "task.create", serde_json::json!({ "title": "Task 2" })).await;
+
+    // Agent reports idle — triggers dispatch of Task 2.
+    call(&mut ws, "agent.status", serde_json::json!({ "active_tasks": 0 })).await;
+
+    // Server dispatches Task 2.
+    let assign2 = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            loop {
+                let raw = ws.next().await.unwrap().unwrap();
+                if let Message::Text(t) = raw {
+                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                    if msg.method.as_deref() == Some("task.assign") { return msg; }
+                }
+            }
+        }
+    ).await.expect("timed out waiting for second task.assign");
+
+    assert_eq!(assign2.params.unwrap()["task"]["title"], "Task 2");
 }
 
 // ── Internal test helpers ─────────────────────────────────────────────────────

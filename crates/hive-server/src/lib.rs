@@ -1,5 +1,6 @@
 //! hive-server library — exposes internal modules for integration tests.
 
+pub mod agent_registry;
 pub mod communication;
 pub mod db;
 pub mod handlers;
