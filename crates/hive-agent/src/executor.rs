@@ -80,9 +80,9 @@ pub fn build_prompt(task: &Task, agent_id: &str, messages: &[PushMessage]) -> St
 fn write_mcp_configs(mcp_port: u16) {
     let hive_url = format!("http://127.0.0.1:{mcp_port}/mcp");
 
-    // Claude Code supports Streamable HTTP via the `url` field.
+    // Claude Code: .mcp.json with type:"http" for Streamable HTTP transport.
     let claude_cfg = serde_json::json!({
-        "mcpServers": { "hive": { "url": hive_url } }
+        "mcpServers": { "hive": { "type": "http", "url": hive_url } }
     });
     let content = serde_json::to_string_pretty(&claude_cfg).unwrap_or_default();
     if let Err(e) = std::fs::write(".mcp.json", &content) {
