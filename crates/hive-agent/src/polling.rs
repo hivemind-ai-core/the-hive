@@ -48,11 +48,13 @@ pub async fn run(
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(BACKOFF_MAX);
             }
-            Some(msg) if msg.result.as_ref().map(|v| v.is_null()).unwrap_or(false) => {
+            // Server returns null result (JSON null deserializes to Option::None) when no task is ready.
+            Some(msg) if msg.error.is_none() && msg.result.as_ref().map_or(true, |v| v.is_null()) => {
                 // No task available — check for unread push messages and execute if present.
-                tracing::debug!("No task available, polling again in {POLL_INTERVAL:?}");
+                info!("No task available, checking push messages...");
                 handle_idle_push_messages(&agent_id, &coding_agent, &cmd_tx, &pending).await;
                 tokio::time::sleep(POLL_INTERVAL).await;
+                backoff = POLL_INTERVAL;
             }
             Some(msg) if msg.error.is_some() => {
                 let err = msg.error.as_ref().unwrap();
@@ -94,19 +96,29 @@ async fn handle_idle_push_messages(
     };
 
     let messages: Vec<PushMessage> = match send_request(cmd_tx, pending, req).await {
-        Some(resp) => resp.result
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default(),
-        None => return,
+        Some(resp) => {
+            if let Some(err) = &resp.error {
+                warn!("push.list error {}: {}", err.code, err.message);
+                return;
+            }
+            resp.result
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default()
+        }
+        None => {
+            warn!("push.list timed out or channel closed");
+            return;
+        }
     };
 
     if messages.is_empty() {
         return;
     }
 
+    info!("Processing {} unread push message(s)", messages.len());
     for m in &messages {
         let from = m.from_agent_id.as_deref().unwrap_or("unknown");
-        info!("Unread push from {from}: {}", m.content);
+        info!("  Push from {from}: {}", m.content);
     }
 
     let message_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();

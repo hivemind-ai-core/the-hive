@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
+use tracing_subscriber::EnvFilter;
 
 use exec::ExecConfig;
 
@@ -45,7 +46,11 @@ fn load_exec_config() -> ExecConfig {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    let level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    let filter = EnvFilter::new(format!(
+        "warn,app_daemon={level},hive_core={level}"
+    ));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     info!("App Daemon starting...");
 

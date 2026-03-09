@@ -748,13 +748,15 @@ pub async fn logs(project_dir: &Path, container: &str, follow: bool) -> Result<(
         vec![(container.to_string(), full)]
     };
 
+    let tail = if follow { "all" } else { "100" };
+
     if selected.len() == 1 {
         let (_, name) = &selected[0];
         let opts = LogsOptionsBuilder::default()
             .stdout(true)
             .stderr(true)
             .follow(follow)
-            .tail("100")
+            .tail(tail)
             .build();
         let mut stream = docker.logs(name, Some(opts));
         while let Some(chunk) = stream.next().await {
@@ -775,7 +777,7 @@ pub async fn logs(project_dir: &Path, container: &str, follow: bool) -> Result<(
                         .stdout(true)
                         .stderr(true)
                         .follow(follow)
-                        .tail("100")
+                        .tail(tail)
                         .build();
                     let mut stream = docker.logs(&name, Some(opts));
                     while let Some(chunk) = stream.next().await {

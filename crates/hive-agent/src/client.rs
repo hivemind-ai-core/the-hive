@@ -151,7 +151,9 @@ fn route_message(
     pending: &PendingRequests,
     push_tx: &UnboundedSender<ApiMessage>,
 ) {
-    if msg.msg_type == MessageType::Response {
+    // Route both Response and Error back to the pending oneshot so callers
+    // don't time out waiting when the server returns an error.
+    if matches!(msg.msg_type, MessageType::Response | MessageType::Error) {
         if let Ok(mut map) = pending.lock() {
             if let Some(tx) = map.remove(&msg.id) {
                 let _ = tx.send(msg);

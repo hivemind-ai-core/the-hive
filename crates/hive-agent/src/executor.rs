@@ -11,8 +11,10 @@ pub struct ExecutionResult {
 }
 
 /// Build the prompt passed to the coding agent, prepending any push messages.
-pub fn build_prompt(task: &Task, messages: &[PushMessage]) -> String {
+pub fn build_prompt(task: &Task, agent_id: &str, messages: &[PushMessage]) -> String {
     let mut prompt = String::new();
+
+    prompt.push_str(&format!("# Your Identity\n\nYou are agent `{agent_id}`.\n\n"));
 
     if !messages.is_empty() {
         prompt.push_str("# Messages from other agents\n\n");
@@ -110,7 +112,7 @@ pub async fn run(
     agent_id: &str,
     messages: &[PushMessage],
 ) -> Result<ExecutionResult> {
-    let prompt = build_prompt(task, messages);
+    let prompt = build_prompt(task, agent_id, messages);
     info!("Spawning '{agent_bin}' for task: {}", task.id);
 
     let mcp_port: u16 = std::env::var("HIVE_MCP_PORT")

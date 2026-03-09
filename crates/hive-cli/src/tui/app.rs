@@ -92,7 +92,7 @@ pub struct App {
     pub task_dialog: Option<TaskDialog>,
     pub comment_dialog: Option<CommentDialog>,
     pub task_edit_dialog: Option<TaskEditDialog>,
-    pub cmd_tx: Option<std::sync::mpsc::Sender<TuiCmd>>,
+    pub cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<TuiCmd>>,
     pub project_dir: PathBuf,
 }
 
@@ -415,7 +415,7 @@ impl App {
             Action::Char('p') if self.screen == Screen::Agents => {
                 if !self.state.agents.is_empty() {
                     self.push_dialog = Some(PushDialog {
-                        target_agent_idx: 0,
+                        target_agent_idx: self.state.selected_agent_idx,
                         content: String::new(),
                     });
                 }

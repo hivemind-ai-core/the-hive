@@ -37,7 +37,7 @@ pub fn run(project_dir: &Path) -> Result<()> {
         let mut seed = existing;
         if seed.agents.is_empty() {
             seed.agents.push(Agent {
-                name: "kilo-1".to_string(),
+                name: "agent-1".to_string(),
                 coding_agent: "kilo".to_string(),
                 auth: "none".to_string(),
                 tags: vec![],

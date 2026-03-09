@@ -349,7 +349,7 @@ fn handle_edit(code: KeyCode, state: &mut ConfigWizardState) -> WizardCmd {
 fn add_agent(state: &mut ConfigWizardState) {
     let n = state.config.agents.len() + 1;
     let agent = Agent {
-        name: format!("kilo-{n}"),
+        name: format!("agent-{n}"),
         coding_agent: "kilo".to_string(),
         auth: "none".to_string(),
         tags: vec![],

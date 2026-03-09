@@ -9,11 +9,17 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 
-use super::state::AppState;
+use super::state::{AppState, TaskSummary};
 use hive_core::types::Agent;
 
 fn staleness_secs(a: &Agent) -> Option<i64> {
     a.last_seen_at.map(|t| (Utc::now() - t).num_seconds())
+}
+
+fn current_task<'a>(tasks: &'a [TaskSummary], agent_id: &str) -> Option<&'a TaskSummary> {
+    tasks.iter().find(|t| {
+        t.status == "inprogress" && t.assigned.as_deref() == Some(agent_id)
+    })
 }
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -35,7 +41,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .agents
         .iter()
         .map(|a| {
-            let (label, style) = match staleness_secs(a) {
+            let busy = current_task(&state.tasks, &a.id).is_some();
+            let (status_marker, status_style) = if busy {
+                ("● ", Style::default().fg(Color::Green))
+            } else {
+                ("○ ", Style::default().fg(Color::DarkGray))
+            };
+            let (name, name_style) = match staleness_secs(a) {
                 None | Some(i64::MIN..=-1) => (
                     format!("{} (stale)", a.name),
                     Style::default().fg(Color::Red),
@@ -50,7 +62,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 ),
                 _ => (a.name.clone(), Style::default()),
             };
-            ListItem::new(Line::from(vec![Span::styled(label, style)]))
+            ListItem::new(Line::from(vec![
+                Span::styled(status_marker, status_style),
+                Span::styled(name, name_style),
+            ]))
         })
         .collect();
 
@@ -66,10 +81,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         &mut list_state,
     );
 
-    render_detail(f, chunks[1], state.agents.get(selected));
+    let selected_agent = state.agents.get(selected);
+    let selected_task = selected_agent.and_then(|a| current_task(&state.tasks, &a.id));
+    render_detail(f, chunks[1], selected_agent, selected_task);
 }
 
-fn render_detail(f: &mut Frame, area: Rect, agent: Option<&Agent>) {
+fn render_detail(f: &mut Frame, area: Rect, agent: Option<&Agent>, task: Option<&TaskSummary>) {
     let block = Block::default().title("Detail").borders(Borders::ALL);
     match agent {
         None => f.render_widget(Paragraph::new("Select an agent").block(block), area),
@@ -94,6 +111,16 @@ fn render_detail(f: &mut Frame, area: Rect, agent: Option<&Agent>) {
                     Style::default().fg(Color::Green),
                 ),
             };
+            let (status_text, status_style) = match task {
+                Some(t) => (
+                    format!("● Working on: {}", t.title),
+                    Style::default().fg(Color::Green),
+                ),
+                None => (
+                    "○ Idle".to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            };
             let lines = vec![
                 Line::from(vec![
                     Span::styled("ID: ", Style::default().add_modifier(Modifier::BOLD)),
@@ -110,6 +137,10 @@ fn render_detail(f: &mut Frame, area: Rect, agent: Option<&Agent>) {
                 Line::from(vec![
                     Span::styled("Last seen: ", Style::default().add_modifier(Modifier::BOLD)),
                     Span::styled(last_seen, seen_style),
+                ]),
+                Line::from(vec![
+                    Span::styled("Status: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(status_text, status_style),
                 ]),
             ];
             f.render_widget(Paragraph::new(lines).block(block), area);
