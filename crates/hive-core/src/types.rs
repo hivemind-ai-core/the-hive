@@ -135,6 +135,237 @@ pub struct Agent {
 
 fn default_capacity_max() -> u8 { 1 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Task ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn task_new_defaults() {
+        let task = Task::new("My Task".to_string(), None, vec![]);
+        assert!(!task.id.is_empty(), "id should be a non-empty UUID");
+        assert_eq!(task.title, "My Task");
+        assert!(task.description.is_none());
+        assert_eq!(task.status, TaskStatus::Pending);
+        assert!(task.assigned_agent_id.is_none());
+        assert!(task.tags.is_empty());
+        assert!(task.result.is_none());
+        assert_eq!(task.position, 0);
+    }
+
+    #[test]
+    fn task_new_with_all_fields() {
+        let tags = vec!["rust".to_string(), "backend".to_string()];
+        let task = Task::new(
+            "Full Task".to_string(),
+            Some("A description".to_string()),
+            tags.clone(),
+        );
+        assert_eq!(task.description.as_deref(), Some("A description"));
+        assert_eq!(task.tags, tags);
+    }
+
+    #[test]
+    fn task_new_generates_unique_ids() {
+        let t1 = Task::new("T1".to_string(), None, vec![]);
+        let t2 = Task::new("T2".to_string(), None, vec![]);
+        assert_ne!(t1.id, t2.id);
+    }
+
+    #[test]
+    fn task_status_serde_kebab_case() {
+        // Serializes to kebab-case strings.
+        assert_eq!(
+            serde_json::to_string(&TaskStatus::InProgress).unwrap(),
+            "\"in-progress\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TaskStatus::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TaskStatus::Done).unwrap(),
+            "\"done\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TaskStatus::Blocked).unwrap(),
+            "\"blocked\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TaskStatus::Cancelled).unwrap(),
+            "\"cancelled\""
+        );
+    }
+
+    #[test]
+    fn task_status_deserialize_kebab_case() {
+        let s: TaskStatus = serde_json::from_str("\"in-progress\"").unwrap();
+        assert_eq!(s, TaskStatus::InProgress);
+        let s: TaskStatus = serde_json::from_str("\"pending\"").unwrap();
+        assert_eq!(s, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn task_status_deserialize_unknown_returns_error() {
+        let result: Result<TaskStatus, _> = serde_json::from_str("\"unknown\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn task_roundtrip_json() {
+        let task = Task::new("Round Trip".to_string(), Some("desc".to_string()), vec!["tag1".to_string()]);
+        let json = serde_json::to_string(&task).unwrap();
+        let decoded: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.id, task.id);
+        assert_eq!(decoded.title, task.title);
+        assert_eq!(decoded.description, task.description);
+        assert_eq!(decoded.status, task.status);
+        assert_eq!(decoded.tags, task.tags);
+    }
+
+    // ── Topic ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn topic_new_defaults() {
+        let topic = Topic::new("My Topic".to_string(), "Content here".to_string(), Some("agent-1".to_string()));
+        assert!(!topic.id.is_empty());
+        assert_eq!(topic.title, "My Topic");
+        assert_eq!(topic.content, "Content here");
+        assert_eq!(topic.creator_agent_id.as_deref(), Some("agent-1"));
+    }
+
+    #[test]
+    fn topic_new_without_creator() {
+        let topic = Topic::new("Anon Topic".to_string(), "Body".to_string(), None);
+        assert!(topic.creator_agent_id.is_none());
+    }
+
+    #[test]
+    fn topic_new_timestamps_equal() {
+        let topic = Topic::new("T".to_string(), "C".to_string(), None);
+        // created_at and last_updated_at are both set to now() on construction.
+        assert!(topic.last_updated_at >= topic.created_at);
+    }
+
+    #[test]
+    fn topic_roundtrip_json() {
+        let topic = Topic::new("Round".to_string(), "Trip".to_string(), Some("a".to_string()));
+        let json = serde_json::to_string(&topic).unwrap();
+        let decoded: Topic = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.id, topic.id);
+        assert_eq!(decoded.title, topic.title);
+        assert_eq!(decoded.content, topic.content);
+    }
+
+    // ── Comment ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn comment_new_defaults() {
+        let c = Comment::new("topic-1".to_string(), "Hello".to_string(), Some("agent-2".to_string()));
+        assert!(!c.id.is_empty());
+        assert_eq!(c.topic_id, "topic-1");
+        assert_eq!(c.content, "Hello");
+        assert_eq!(c.creator_agent_id.as_deref(), Some("agent-2"));
+    }
+
+    #[test]
+    fn comment_new_without_creator() {
+        let c = Comment::new("t".to_string(), "C".to_string(), None);
+        assert!(c.creator_agent_id.is_none());
+    }
+
+    #[test]
+    fn comment_roundtrip_json() {
+        let c = Comment::new("tid".to_string(), "body".to_string(), None);
+        let json = serde_json::to_string(&c).unwrap();
+        let decoded: Comment = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.id, c.id);
+        assert_eq!(decoded.topic_id, c.topic_id);
+        assert_eq!(decoded.content, c.content);
+    }
+
+    // ── PushMessage ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn push_message_new_defaults() {
+        let m = PushMessage::new("agent-b".to_string(), "ping".to_string(), Some("agent-a".to_string()));
+        assert!(!m.id.is_empty());
+        assert_eq!(m.to_agent_id, "agent-b");
+        assert_eq!(m.content, "ping");
+        assert_eq!(m.from_agent_id.as_deref(), Some("agent-a"));
+        assert!(!m.delivered, "new messages should not be delivered");
+    }
+
+    #[test]
+    fn push_message_new_no_sender() {
+        let m = PushMessage::new("agent-b".to_string(), "msg".to_string(), None);
+        assert!(m.from_agent_id.is_none());
+    }
+
+    #[test]
+    fn push_message_roundtrip_json() {
+        let m = PushMessage::new("b".to_string(), "text".to_string(), Some("a".to_string()));
+        let json = serde_json::to_string(&m).unwrap();
+        let decoded: PushMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.id, m.id);
+        assert_eq!(decoded.delivered, false);
+    }
+
+    // ── Agent ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn agent_capacity_max_defaults_to_1() {
+        let json = r#"{"id":"a","name":"n","tags":[]}"#;
+        let agent: Agent = serde_json::from_str(json).unwrap();
+        assert_eq!(agent.capacity_max, 1);
+    }
+
+    #[test]
+    fn agent_capacity_max_explicit() {
+        let json = r#"{"id":"a","name":"n","tags":[],"capacity_max":4}"#;
+        let agent: Agent = serde_json::from_str(json).unwrap();
+        assert_eq!(agent.capacity_max, 4);
+    }
+
+    // ── ApiMessage / MessageType ──────────────────────────────────────────────
+
+    #[test]
+    fn message_type_serde() {
+        assert_eq!(serde_json::to_string(&MessageType::Request).unwrap(), "\"request\"");
+        assert_eq!(serde_json::to_string(&MessageType::Response).unwrap(), "\"response\"");
+        assert_eq!(serde_json::to_string(&MessageType::Push).unwrap(), "\"push\"");
+        assert_eq!(serde_json::to_string(&MessageType::Error).unwrap(), "\"error\"");
+    }
+
+    #[test]
+    fn api_message_roundtrip_json() {
+        let msg = ApiMessage {
+            msg_type: MessageType::Request,
+            id: "req-1".to_string(),
+            method: Some("task.create".to_string()),
+            params: Some(serde_json::json!({"title": "T"})),
+            result: None,
+            error: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ApiMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.id, "req-1");
+        assert_eq!(decoded.method.as_deref(), Some("task.create"));
+        assert!(decoded.result.is_none());
+        assert!(decoded.error.is_none());
+    }
+
+    #[test]
+    fn api_error_serde() {
+        let err = ApiError { code: 404, message: "not found".to_string() };
+        let json = serde_json::to_string(&err).unwrap();
+        let decoded: ApiError = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.code, 404);
+        assert_eq!(decoded.message, "not found");
+    }
+}
+
 /// API request/response wrapper
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiMessage {

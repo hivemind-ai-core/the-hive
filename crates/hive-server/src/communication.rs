@@ -126,3 +126,156 @@ fn row_to_agent(row: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
         capacity_max: 1,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_test_db;
+    use hive_core::types::{Agent, PushMessage};
+
+    fn make_agent(id: &str) -> Agent {
+        Agent {
+            id: id.to_string(),
+            name: format!("Agent {id}"),
+            tags: vec![],
+            connected_at: Some(Utc::now()),
+            last_seen_at: Some(Utc::now()),
+            capacity_max: 1,
+        }
+    }
+
+    fn make_msg(to: &str, from: &str, content: &str) -> PushMessage {
+        PushMessage::new(to.to_string(), content.to_string(), Some(from.to_string()))
+    }
+
+    // ── push messages ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn insert_and_pending_messages() {
+        let pool = open_test_db();
+        let msg = make_msg("agent-b", "agent-a", "hello");
+        insert_message(&pool, &msg).unwrap();
+        let pending = pending_messages(&pool, "agent-b").unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].content, "hello");
+        assert_eq!(pending[0].from_agent_id.as_deref(), Some("agent-a"));
+        assert!(!pending[0].delivered);
+    }
+
+    #[test]
+    fn pending_messages_empty_when_none() {
+        let pool = open_test_db();
+        let msgs = pending_messages(&pool, "no-such-agent").unwrap();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn pending_messages_only_returns_undelivered() {
+        let pool = open_test_db();
+        let m1 = make_msg("agent-b", "agent-a", "first");
+        let m2 = make_msg("agent-b", "agent-a", "second");
+        insert_message(&pool, &m1).unwrap();
+        insert_message(&pool, &m2).unwrap();
+        mark_delivered(&pool, &m1.id).unwrap();
+        let pending = pending_messages(&pool, "agent-b").unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].content, "second");
+    }
+
+    #[test]
+    fn mark_delivered_updates_flag() {
+        let pool = open_test_db();
+        let msg = make_msg("agent-b", "agent-a", "ping");
+        insert_message(&pool, &msg).unwrap();
+        mark_delivered(&pool, &msg.id).unwrap();
+        // No more pending messages.
+        let pending = pending_messages(&pool, "agent-b").unwrap();
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn pending_messages_only_for_recipient() {
+        let pool = open_test_db();
+        insert_message(&pool, &make_msg("agent-b", "agent-a", "for B")).unwrap();
+        insert_message(&pool, &make_msg("agent-c", "agent-a", "for C")).unwrap();
+        let b_msgs = pending_messages(&pool, "agent-b").unwrap();
+        assert_eq!(b_msgs.len(), 1);
+        assert_eq!(b_msgs[0].content, "for B");
+    }
+
+    #[test]
+    fn pending_messages_ordered_oldest_first() {
+        let pool = open_test_db();
+        let m1 = make_msg("agent-b", "agent-a", "first");
+        let m2 = make_msg("agent-b", "agent-a", "second");
+        insert_message(&pool, &m1).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        insert_message(&pool, &m2).unwrap();
+        let pending = pending_messages(&pool, "agent-b").unwrap();
+        assert_eq!(pending[0].content, "first");
+        assert_eq!(pending[1].content, "second");
+    }
+
+    // ── agents ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn upsert_and_list_agents() {
+        let pool = open_test_db();
+        upsert_agent(&pool, &make_agent("alpha")).unwrap();
+        upsert_agent(&pool, &make_agent("beta")).unwrap();
+        let agents = list_agents(&pool).unwrap();
+        assert_eq!(agents.len(), 2);
+        // Ordered by name ASC.
+        assert_eq!(agents[0].id, "alpha");
+        assert_eq!(agents[1].id, "beta");
+    }
+
+    #[test]
+    fn upsert_agent_updates_existing() {
+        let pool = open_test_db();
+        let mut agent = make_agent("x");
+        upsert_agent(&pool, &agent).unwrap();
+        agent.name = "Updated Name".to_string();
+        agent.tags = vec!["rust".to_string()];
+        upsert_agent(&pool, &agent).unwrap();
+        let agents = list_agents(&pool).unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].name, "Updated Name");
+        assert!(agents[0].tags.contains(&"rust".to_string()));
+    }
+
+    #[test]
+    fn list_agents_empty_db() {
+        let pool = open_test_db();
+        let agents = list_agents(&pool).unwrap();
+        assert!(agents.is_empty());
+    }
+
+    #[test]
+    fn touch_agent_updates_last_seen_at() {
+        let pool = open_test_db();
+        let mut agent = make_agent("touchable");
+        // Set last_seen_at to a known past time.
+        agent.last_seen_at = Some(chrono::DateTime::from_timestamp(0, 0).unwrap());
+        upsert_agent(&pool, &agent).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        touch_agent(&pool, "touchable").unwrap();
+        let agents = list_agents(&pool).unwrap();
+        let updated = agents.iter().find(|a| a.id == "touchable").unwrap();
+        // last_seen_at should now be recent (after epoch 0).
+        if let Some(lsa) = updated.last_seen_at {
+            assert!(lsa.timestamp() > 1_000_000_000, "last_seen_at should be updated to now");
+        }
+    }
+
+    #[test]
+    fn upsert_agent_with_tags() {
+        let pool = open_test_db();
+        let mut agent = make_agent("tagged-agent");
+        agent.tags = vec!["rust".to_string(), "backend".to_string()];
+        upsert_agent(&pool, &agent).unwrap();
+        let agents = list_agents(&pool).unwrap();
+        assert!(agents[0].tags.contains(&"rust".to_string()));
+        assert!(agents[0].tags.contains(&"backend".to_string()));
+    }
+}

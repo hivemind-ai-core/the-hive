@@ -108,6 +108,77 @@ mod tests {
     fn test_empty_string_returns_none() {
         assert_eq!(extract_from_output(""), None);
     }
+
+    #[test]
+    fn test_session_id_with_trailing_whitespace_trimmed() {
+        assert_eq!(
+            extract_from_output("Session: trimmed-id   "),
+            Some("trimmed-id".to_string())
+        );
+    }
+
+    #[test]
+    fn test_session_id_on_indented_line() {
+        // Leading whitespace on the line is trimmed before prefix matching.
+        assert_eq!(
+            extract_from_output("   Session: indented-id"),
+            Some("indented-id".to_string())
+        );
+    }
+
+    #[test]
+    fn test_json_with_malformed_json_lines_are_skipped() {
+        let output = "{not valid json}\n{\"sessionId\":\"after-bad\"}";
+        assert_eq!(extract_from_output(output), Some("after-bad".to_string()));
+    }
+
+    #[test]
+    fn test_plain_text_wins_over_earlier_json() {
+        // JSON line is scanned first but stored; plain text line returns immediately.
+        let output = "{\"sessionId\":\"json-first\"}\nSession: plain-wins";
+        assert_eq!(extract_from_output(output), Some("plain-wins".to_string()));
+    }
+
+    #[test]
+    fn test_multiple_plain_text_lines_first_wins() {
+        // The function returns immediately on the first plain text match.
+        let output = "Session: first-wins\nSession ID: second-loses";
+        assert_eq!(extract_from_output(output), Some("first-wins".to_string()));
+    }
+
+    #[test]
+    fn test_session_id_with_hyphens_and_underscores() {
+        assert_eq!(
+            extract_from_output("Session: abc-123_xyz"),
+            Some("abc-123_xyz".to_string())
+        );
+    }
+
+    #[test]
+    fn test_json_snake_case_last_one_wins() {
+        let output = "{\"session_id\":\"snake-first\"}\n{\"session_id\":\"snake-second\"}";
+        assert_eq!(extract_from_output(output), Some("snake-second".to_string()));
+    }
+
+    #[test]
+    fn test_json_non_object_lines_ignored() {
+        // Arrays and other non-object JSON are ignored.
+        let output = "[1, 2, 3]\n{\"sessionId\":\"found\"}";
+        assert_eq!(extract_from_output(output), Some("found".to_string()));
+    }
+
+    #[test]
+    fn test_json_null_session_id_not_extracted() {
+        // null is not a string — as_str() returns None, so it is ignored.
+        let output = r#"{"sessionId":null}"#;
+        assert_eq!(extract_from_output(output), None);
+    }
+
+    #[test]
+    fn test_session_id_format_case_sensitive() {
+        // "session:" (lowercase s) does not match "Session:" prefix.
+        assert_eq!(extract_from_output("session: lowercase"), None);
+    }
 }
 
 /// Extract a session ID from coding agent output.

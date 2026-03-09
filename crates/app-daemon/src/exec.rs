@@ -131,6 +131,106 @@ mod tests {
         cfg.commands.insert("test".to_string(), "jest --ci".to_string());
         assert_eq!(resolve_command("test", &cfg).unwrap(), "jest --ci");
     }
+
+    #[test]
+    fn test_resolve_empty_command_errors() {
+        let cfg = default_cfg();
+        let err = resolve_command("", &cfg).unwrap_err();
+        assert!(err.contains("unknown command"), "error: {err}");
+    }
+
+    #[test]
+    fn test_resolve_run_prefix_near_match_rejected() {
+        let cfg = default_cfg();
+        // "carg" is a partial match for "cargo" but not a valid prefix.
+        let err = resolve_command("run carg test", &cfg).unwrap_err();
+        assert!(err.contains("not allowed"), "near-match should be rejected: {err}");
+    }
+
+    #[test]
+    fn test_resolve_run_with_whitespace_only_inner() {
+        let cfg = default_cfg();
+        // "run " with nothing (or only whitespace) after → empty inner after trim.
+        let err = resolve_command("run ", &cfg).unwrap_err();
+        assert!(err.contains("not allowed"), "empty run inner should be rejected: {err}");
+    }
+
+    #[test]
+    fn test_resolve_run_exact_prefix_no_args() {
+        let cfg = default_cfg();
+        // Exact prefix match with no additional args is allowed.
+        assert_eq!(resolve_command("run npm", &cfg).unwrap(), "npm");
+        assert_eq!(resolve_command("run pnpm", &cfg).unwrap(), "pnpm");
+    }
+
+    #[test]
+    fn test_resolve_run_cargo_subcommands() {
+        let cfg = default_cfg();
+        assert_eq!(resolve_command("run cargo build", &cfg).unwrap(), "cargo build");
+        assert_eq!(resolve_command("run cargo test --release", &cfg).unwrap(), "cargo test --release");
+        assert_eq!(
+            resolve_command("run cargo clippy -- -D warnings", &cfg).unwrap(),
+            "cargo clippy -- -D warnings"
+        );
+    }
+
+    #[test]
+    fn test_resolve_error_lists_allowed_prefixes() {
+        let cfg = default_cfg();
+        let err = resolve_command("run rm -rf /", &cfg).unwrap_err();
+        assert!(
+            err.contains("cargo") || err.contains("npm") || err.contains("pnpm"),
+            "error should list allowed prefixes: {err}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_error_lists_aliases() {
+        let cfg = default_cfg();
+        let err = resolve_command("nonexistent", &cfg).unwrap_err();
+        // Should mention some known alias.
+        assert!(
+            err.contains("test") || err.contains("build") || err.contains("check"),
+            "error should list aliases: {err}"
+        );
+    }
+
+    #[test]
+    fn test_exec_config_default_aliases() {
+        let cfg = ExecConfig::default();
+        assert!(cfg.commands.contains_key("test"));
+        assert!(cfg.commands.contains_key("build"));
+        assert!(cfg.commands.contains_key("check"));
+    }
+
+    #[test]
+    fn test_exec_config_default_run_prefixes() {
+        let cfg = ExecConfig::default();
+        assert!(cfg.run_prefixes.contains(&"cargo".to_string()));
+        assert!(cfg.run_prefixes.contains(&"npm".to_string()));
+        assert!(cfg.run_prefixes.contains(&"pnpm".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_no_run_prefixes_rejects_all_run() {
+        let cfg = ExecConfig {
+            commands: std::collections::HashMap::new(),
+            run_prefixes: vec![],
+        };
+        let err = resolve_command("run cargo test", &cfg).unwrap_err();
+        assert!(err.contains("not allowed"), "no prefixes → rejected: {err}");
+    }
+
+    #[test]
+    fn test_resolve_custom_run_prefix() {
+        let cfg = ExecConfig {
+            commands: std::collections::HashMap::new(),
+            run_prefixes: vec!["python".to_string()],
+        };
+        assert_eq!(resolve_command("run python main.py", &cfg).unwrap(), "python main.py");
+        let err = resolve_command("run cargo build", &cfg).unwrap_err();
+        assert!(err.contains("not allowed"), "non-configured prefix rejected: {err}");
+    }
 }
 
 pub async fn exec(

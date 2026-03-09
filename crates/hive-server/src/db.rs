@@ -83,3 +83,73 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (3, include_str!("migrations/003_communication.sql")),
     (4, include_str!("migrations/004_indexes.sql")),
 ];
+
+#[cfg(test)]
+pub(crate) fn open_test_db() -> DbPool {
+    let pool = open(":memory:").expect("open in-memory db");
+    run_migrations(&pool).expect("run migrations");
+    pool
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_in_memory_succeeds() {
+        let pool = open(":memory:").expect("should open");
+        let conn = pool.get().expect("should get connection");
+        // :memory: DB returns "memory" even with WAL pragma — that is expected.
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert!(mode == "wal" || mode == "memory");
+    }
+
+    #[test]
+    fn run_migrations_creates_all_tables() {
+        let pool = open_test_db();
+        let conn = pool.get().unwrap();
+        for table in &[
+            "tasks",
+            "task_dependencies",
+            "topics",
+            "comments",
+            "push_messages",
+            "agents",
+            "schema_migrations",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{table}'"
+                    ),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "table '{table}' should exist after migrations");
+        }
+    }
+
+    #[test]
+    fn migrations_are_idempotent() {
+        let pool = open_test_db();
+        // Running again must not error.
+        run_migrations(&pool).expect("second migration run should succeed");
+    }
+
+    #[test]
+    fn migration_versions_all_recorded() {
+        let pool = open_test_db();
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count,
+            MIGRATIONS.len() as i64,
+            "every migration should be recorded exactly once"
+        );
+    }
+}

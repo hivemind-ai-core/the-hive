@@ -122,3 +122,157 @@ fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
         created_at: created_at_str.parse().unwrap_or_else(|_| Utc::now()),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_test_db;
+    use hive_core::types::{Comment, Topic};
+
+    fn make_topic(title: &str) -> Topic {
+        Topic::new(title.to_string(), "content".to_string(), Some("agent-1".to_string()))
+    }
+
+    fn make_comment(topic_id: &str, content: &str) -> Comment {
+        Comment::new(topic_id.to_string(), content.to_string(), Some("agent-1".to_string()))
+    }
+
+    // ── insert / get topic ────────────────────────────────────────────────────
+
+    #[test]
+    fn insert_and_get_topic_round_trip() {
+        let pool = open_test_db();
+        let topic = make_topic("Hello World");
+        insert_topic(&pool, &topic).unwrap();
+        let got = get_topic(&pool, &topic.id).unwrap().expect("should exist");
+        assert_eq!(got.id, topic.id);
+        assert_eq!(got.title, "Hello World");
+        assert_eq!(got.content, "content");
+        assert_eq!(got.creator_agent_id.as_deref(), Some("agent-1"));
+    }
+
+    #[test]
+    fn get_topic_nonexistent_returns_none() {
+        let pool = open_test_db();
+        let result = get_topic(&pool, "ghost-id").unwrap();
+        assert!(result.is_none());
+    }
+
+    // ── list_topics ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_topics_empty_db() {
+        let pool = open_test_db();
+        let topics = list_topics(&pool).unwrap();
+        assert!(topics.is_empty());
+    }
+
+    #[test]
+    fn list_topics_returns_all() {
+        let pool = open_test_db();
+        insert_topic(&pool, &make_topic("T1")).unwrap();
+        insert_topic(&pool, &make_topic("T2")).unwrap();
+        let topics = list_topics(&pool).unwrap();
+        assert_eq!(topics.len(), 2);
+    }
+
+    #[test]
+    fn list_topics_ordered_by_last_updated_desc() {
+        let pool = open_test_db();
+        let t1 = make_topic("Old");
+        let t2 = make_topic("New");
+        insert_topic(&pool, &t1).unwrap();
+        // Small sleep to ensure different timestamps.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        insert_topic(&pool, &t2).unwrap();
+        let topics = list_topics(&pool).unwrap();
+        // Most recently created topic first (DESC order).
+        assert_eq!(topics[0].title, "New");
+    }
+
+    // ── list_topics_since ─────────────────────────────────────────────────────
+
+    #[test]
+    fn list_topics_since_filters_correctly() {
+        let pool = open_test_db();
+        let before = chrono::Utc::now().timestamp() - 10;
+        insert_topic(&pool, &make_topic("Recent")).unwrap();
+        let topics = list_topics_since(&pool, before).unwrap();
+        assert_eq!(topics.len(), 1);
+        assert_eq!(topics[0].title, "Recent");
+    }
+
+    #[test]
+    fn list_topics_since_future_timestamp_returns_empty() {
+        let pool = open_test_db();
+        insert_topic(&pool, &make_topic("Old Topic")).unwrap();
+        let future = chrono::Utc::now().timestamp() + 9999;
+        let topics = list_topics_since(&pool, future).unwrap();
+        assert!(topics.is_empty());
+    }
+
+    // ── insert_comment / get_comments ─────────────────────────────────────────
+
+    #[test]
+    fn insert_comment_and_retrieve() {
+        let pool = open_test_db();
+        let topic = make_topic("Discussion");
+        insert_topic(&pool, &topic).unwrap();
+        let comment = make_comment(&topic.id, "First reply");
+        insert_comment(&pool, &comment).unwrap();
+        let comments = get_comments(&pool, &topic.id).unwrap();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].content, "First reply");
+        assert_eq!(comments[0].topic_id, topic.id);
+    }
+
+    #[test]
+    fn get_comments_empty_for_unknown_topic() {
+        let pool = open_test_db();
+        let comments = get_comments(&pool, "ghost-topic").unwrap();
+        assert!(comments.is_empty());
+    }
+
+    #[test]
+    fn get_comments_ordered_by_created_at_asc() {
+        let pool = open_test_db();
+        let topic = make_topic("Thread");
+        insert_topic(&pool, &topic).unwrap();
+        insert_comment(&pool, &make_comment(&topic.id, "First")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        insert_comment(&pool, &make_comment(&topic.id, "Second")).unwrap();
+        let comments = get_comments(&pool, &topic.id).unwrap();
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments[0].content, "First");
+        assert_eq!(comments[1].content, "Second");
+    }
+
+    #[test]
+    fn insert_comment_bumps_topic_last_updated_at() {
+        let pool = open_test_db();
+        let topic = make_topic("Bumpy");
+        insert_topic(&pool, &topic).unwrap();
+        let before = get_topic(&pool, &topic.id).unwrap().unwrap().last_updated_at;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let mut comment = make_comment(&topic.id, "bump");
+        // Advance created_at so the bump is detectable.
+        comment.created_at = chrono::Utc::now();
+        insert_comment(&pool, &comment).unwrap();
+        let after = get_topic(&pool, &topic.id).unwrap().unwrap().last_updated_at;
+        assert!(after >= before, "last_updated_at should be bumped");
+    }
+
+    #[test]
+    fn get_comments_only_returns_for_own_topic() {
+        let pool = open_test_db();
+        let t1 = make_topic("T1");
+        let t2 = make_topic("T2");
+        insert_topic(&pool, &t1).unwrap();
+        insert_topic(&pool, &t2).unwrap();
+        insert_comment(&pool, &make_comment(&t1.id, "for T1")).unwrap();
+        insert_comment(&pool, &make_comment(&t2.id, "for T2")).unwrap();
+        let t1_comments = get_comments(&pool, &t1.id).unwrap();
+        assert_eq!(t1_comments.len(), 1);
+        assert_eq!(t1_comments[0].content, "for T1");
+    }
+}

@@ -385,3 +385,363 @@ fn topological_reorder(pool: &DbPool) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_test_db;
+    use hive_core::types::Task;
+
+    fn make_task(title: &str) -> Task {
+        Task::new(title.to_string(), None, vec![])
+    }
+
+    fn make_tagged_task(title: &str, tags: &[&str]) -> Task {
+        Task::new(
+            title.to_string(),
+            None,
+            tags.iter().map(|s| s.to_string()).collect(),
+        )
+    }
+
+    // ── insert / get ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn insert_and_get_round_trip() {
+        let pool = open_test_db();
+        let task = make_task("Round Trip");
+        insert_task(&pool, &task).unwrap();
+        let got = get_task(&pool, &task.id).unwrap().expect("should exist");
+        assert_eq!(got.id, task.id);
+        assert_eq!(got.title, "Round Trip");
+        assert_eq!(got.status, TaskStatus::Pending);
+        assert!(got.assigned_agent_id.is_none());
+    }
+
+    #[test]
+    fn get_nonexistent_returns_none() {
+        let pool = open_test_db();
+        let result = get_task(&pool, "nonexistent-id").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn insert_task_with_description_and_tags() {
+        let pool = open_test_db();
+        let mut task = make_task("Tagged");
+        task.description = Some("desc".to_string());
+        task.tags = vec!["rust".to_string(), "backend".to_string()];
+        insert_task(&pool, &task).unwrap();
+        let got = get_task(&pool, &task.id).unwrap().unwrap();
+        assert_eq!(got.description.as_deref(), Some("desc"));
+        assert!(got.tags.contains(&"rust".to_string()));
+        assert!(got.tags.contains(&"backend".to_string()));
+    }
+
+    // ── update ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn update_persists_changes() {
+        let pool = open_test_db();
+        let mut task = make_task("Original");
+        insert_task(&pool, &task).unwrap();
+        task.title = "Updated".to_string();
+        task.description = Some("new desc".to_string());
+        update_task(&pool, &task).unwrap();
+        let got = get_task(&pool, &task.id).unwrap().unwrap();
+        assert_eq!(got.title, "Updated");
+        assert_eq!(got.description.as_deref(), Some("new desc"));
+    }
+
+    // ── list_tasks ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_all_tasks_no_filter() {
+        let pool = open_test_db();
+        insert_task(&pool, &make_task("T1")).unwrap();
+        insert_task(&pool, &make_task("T2")).unwrap();
+        let tasks = list_tasks(&pool, None, None, None).unwrap();
+        assert_eq!(tasks.len(), 2);
+    }
+
+    #[test]
+    fn list_tasks_filter_by_status() {
+        let pool = open_test_db();
+        let task = make_task("Pending One");
+        insert_task(&pool, &task).unwrap();
+        // Claim it so it becomes in-progress.
+        get_next(&pool, "agent-x", None).unwrap();
+        let pending = list_tasks(&pool, Some("pending"), None, None).unwrap();
+        assert!(pending.is_empty());
+        let in_prog = list_tasks(&pool, Some("in-progress"), None, None).unwrap();
+        assert_eq!(in_prog.len(), 1);
+    }
+
+    #[test]
+    fn list_tasks_filter_by_tag() {
+        let pool = open_test_db();
+        insert_task(&pool, &make_tagged_task("Rust Task", &["rust"])).unwrap();
+        insert_task(&pool, &make_tagged_task("Python Task", &["python"])).unwrap();
+        insert_task(&pool, &make_task("Untagged")).unwrap();
+        let rust_tasks = list_tasks(&pool, None, Some("rust"), None).unwrap();
+        assert_eq!(rust_tasks.len(), 1);
+        assert_eq!(rust_tasks[0].title, "Rust Task");
+    }
+
+    #[test]
+    fn list_tasks_filter_by_assigned_agent() {
+        let pool = open_test_db();
+        insert_task(&pool, &make_task("A")).unwrap();
+        insert_task(&pool, &make_task("B")).unwrap();
+        get_next(&pool, "agent-1", None).unwrap();
+        let assigned = list_tasks(&pool, None, None, Some("agent-1")).unwrap();
+        assert_eq!(assigned.len(), 1);
+        assert_eq!(assigned[0].assigned_agent_id.as_deref(), Some("agent-1"));
+    }
+
+    // ── get_next ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn get_next_returns_none_when_no_tasks() {
+        let pool = open_test_db();
+        let result = get_next(&pool, "agent-1", None).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn get_next_claims_pending_task() {
+        let pool = open_test_db();
+        let task = make_task("Work Item");
+        insert_task(&pool, &task).unwrap();
+        let claimed = get_next(&pool, "agent-1", None).unwrap().expect("should get a task");
+        assert_eq!(claimed.id, task.id);
+        assert_eq!(claimed.status, TaskStatus::InProgress);
+        assert_eq!(claimed.assigned_agent_id.as_deref(), Some("agent-1"));
+    }
+
+    #[test]
+    fn get_next_does_not_return_task_blocked_by_dep() {
+        let pool = open_test_db();
+        let dep = make_task("Dependency");
+        let blocked = make_task("Blocked Task");
+        insert_task(&pool, &dep).unwrap();
+        insert_task(&pool, &blocked).unwrap();
+        set_dependency(&pool, &blocked.id, &dep.id).unwrap();
+        // Only the dependency is claimable.
+        let first = get_next(&pool, "agent-1", None).unwrap().expect("should get dep");
+        assert_eq!(first.id, dep.id);
+        // Dependency is in-progress, not done → blocked task still unavailable.
+        let second = get_next(&pool, "agent-2", None).unwrap();
+        assert!(second.is_none(), "blocked task should not be claimable while dep is in-progress");
+    }
+
+    #[test]
+    fn get_next_unblocks_after_dependency_done() {
+        let pool = open_test_db();
+        let dep = make_task("Dep");
+        let work = make_task("Blocked");
+        insert_task(&pool, &dep).unwrap();
+        insert_task(&pool, &work).unwrap();
+        set_dependency(&pool, &work.id, &dep.id).unwrap();
+        get_next(&pool, "agent-1", None).unwrap(); // claims dep
+        complete(&pool, &dep.id, None).unwrap();
+        let next = get_next(&pool, "agent-2", None).unwrap().expect("should be unblocked");
+        assert_eq!(next.id, work.id);
+    }
+
+    #[test]
+    fn get_next_respects_tag_filter() {
+        let pool = open_test_db();
+        insert_task(&pool, &make_tagged_task("Rust Task", &["rust"])).unwrap();
+        insert_task(&pool, &make_tagged_task("Python Task", &["python"])).unwrap();
+        let claimed = get_next(&pool, "agent-rust", Some("rust")).unwrap().expect("should get task");
+        assert_eq!(claimed.title, "Rust Task");
+        // Python task stays pending.
+        let remaining = list_tasks(&pool, Some("pending"), None, None).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].title, "Python Task");
+    }
+
+    #[test]
+    fn get_next_tagged_agent_can_claim_untagged_task() {
+        let pool = open_test_db();
+        insert_task(&pool, &make_task("Untagged Task")).unwrap();
+        // A tagged agent can claim untagged tasks.
+        let claimed = get_next(&pool, "agent-rust", Some("rust")).unwrap();
+        assert!(claimed.is_some(), "tagged agent should claim untagged task");
+    }
+
+    // ── complete ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn complete_marks_task_done_with_result() {
+        let pool = open_test_db();
+        let task = make_task("Finish Me");
+        insert_task(&pool, &task).unwrap();
+        let done = complete(&pool, &task.id, Some("done result".to_string())).unwrap();
+        assert_eq!(done.status, TaskStatus::Done);
+        assert_eq!(done.result.as_deref(), Some("done result"));
+    }
+
+    #[test]
+    fn complete_without_result() {
+        let pool = open_test_db();
+        let task = make_task("No Result");
+        insert_task(&pool, &task).unwrap();
+        let done = complete(&pool, &task.id, None).unwrap();
+        assert_eq!(done.status, TaskStatus::Done);
+        assert!(done.result.is_none());
+    }
+
+    #[test]
+    fn complete_nonexistent_task_returns_error() {
+        let pool = open_test_db();
+        let result = complete(&pool, "no-such-id", None);
+        assert!(result.is_err());
+    }
+
+    // ── reset_in_progress_for_agent ───────────────────────────────────────────
+
+    #[test]
+    fn reset_in_progress_resets_and_returns_count() {
+        let pool = open_test_db();
+        insert_task(&pool, &make_task("T1")).unwrap();
+        insert_task(&pool, &make_task("T2")).unwrap();
+        get_next(&pool, "agent-drop", None).unwrap();
+        get_next(&pool, "agent-drop", None).unwrap();
+        let count = reset_in_progress_for_agent(&pool, "agent-drop").unwrap();
+        assert_eq!(count, 2);
+        let pending = list_tasks(&pool, Some("pending"), None, None).unwrap();
+        assert_eq!(pending.len(), 2);
+        assert!(pending.iter().all(|t| t.assigned_agent_id.is_none()));
+    }
+
+    #[test]
+    fn reset_in_progress_only_affects_target_agent() {
+        let pool = open_test_db();
+        insert_task(&pool, &make_task("A")).unwrap();
+        insert_task(&pool, &make_task("B")).unwrap();
+        get_next(&pool, "agent-1", None).unwrap();
+        get_next(&pool, "agent-2", None).unwrap();
+        reset_in_progress_for_agent(&pool, "agent-1").unwrap();
+        let in_prog = list_tasks(&pool, Some("in-progress"), None, None).unwrap();
+        assert_eq!(in_prog.len(), 1);
+        assert_eq!(in_prog[0].assigned_agent_id.as_deref(), Some("agent-2"));
+    }
+
+    #[test]
+    fn reset_returns_zero_when_no_tasks_match() {
+        let pool = open_test_db();
+        let count = reset_in_progress_for_agent(&pool, "ghost-agent").unwrap();
+        assert_eq!(count, 0);
+    }
+
+    // ── split ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn split_cancels_parent_creates_subtasks() {
+        let pool = open_test_db();
+        let parent = make_task("Parent");
+        insert_task(&pool, &parent).unwrap();
+        let created = split(&pool, &parent.id, vec![make_task("S1"), make_task("S2"), make_task("S3")]).unwrap();
+        assert_eq!(created.len(), 3);
+        let p = get_task(&pool, &parent.id).unwrap().unwrap();
+        assert_eq!(p.status, TaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn split_creates_sequential_chain_deps() {
+        let pool = open_test_db();
+        let parent = make_task("Parent");
+        insert_task(&pool, &parent).unwrap();
+        let s1 = make_task("S1");
+        let s2 = make_task("S2");
+        let s1_id = s1.id.clone();
+        let s2_id = s2.id.clone();
+        split(&pool, &parent.id, vec![s1, s2]).unwrap();
+        // S1 has no deps → claimable first.
+        let first = get_next(&pool, "agent", None).unwrap().expect("should get S1");
+        assert_eq!(first.id, s1_id);
+        // S2 depends on S1 which is in-progress → not claimable.
+        let second = get_next(&pool, "agent2", None).unwrap();
+        assert!(
+            second.as_ref().map(|t| t.id != s2_id).unwrap_or(true),
+            "S2 should be blocked until S1 is done"
+        );
+    }
+
+    #[test]
+    fn split_nonexistent_parent_errors() {
+        let pool = open_test_db();
+        let result = split(&pool, "ghost-id", vec![make_task("Sub")]);
+        assert!(result.is_err());
+    }
+
+    // ── set_dependency ────────────────────────────────────────────────────────
+
+    #[test]
+    fn set_dependency_self_reference_errors() {
+        let pool = open_test_db();
+        let task = make_task("Self");
+        insert_task(&pool, &task).unwrap();
+        let result = set_dependency(&pool, &task.id, &task.id);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("itself"));
+    }
+
+    #[test]
+    fn set_dependency_cycle_errors() {
+        let pool = open_test_db();
+        let a = make_task("A");
+        let b = make_task("B");
+        insert_task(&pool, &a).unwrap();
+        insert_task(&pool, &b).unwrap();
+        set_dependency(&pool, &a.id, &b.id).unwrap(); // A → B
+        let result = set_dependency(&pool, &b.id, &a.id); // B → A (cycle)
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("circular"));
+    }
+
+    #[test]
+    fn cycle_detection_does_not_persist_bad_edge() {
+        let pool = open_test_db();
+        let a = make_task("A");
+        let b = make_task("B");
+        insert_task(&pool, &a).unwrap();
+        insert_task(&pool, &b).unwrap();
+        set_dependency(&pool, &a.id, &b.id).unwrap();
+        let _ = set_dependency(&pool, &b.id, &a.id); // cycle, should fail
+        // A should still have exactly one dependency (b), and b should have none.
+        let conn = pool.get().unwrap();
+        let a_dep_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_dependencies WHERE task_id = ?1",
+                rusqlite::params![a.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let b_dep_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_dependencies WHERE task_id = ?1",
+                rusqlite::params![b.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(a_dep_count, 1);
+        assert_eq!(b_dep_count, 0, "cycle edge should be rolled back");
+    }
+
+    #[test]
+    fn set_dependency_reorders_positions() {
+        let pool = open_test_db();
+        let a = make_task("A");
+        let b = make_task("B");
+        insert_task(&pool, &a).unwrap();
+        insert_task(&pool, &b).unwrap();
+        set_dependency(&pool, &b.id, &a.id).unwrap();
+        let all = list_tasks(&pool, None, None, None).unwrap();
+        let pos_a = all.iter().find(|t| t.id == a.id).unwrap().position;
+        let pos_b = all.iter().find(|t| t.id == b.id).unwrap().position;
+        assert!(pos_a < pos_b, "A must be positioned before B");
+    }
+}
