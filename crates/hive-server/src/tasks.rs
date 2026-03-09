@@ -185,7 +185,7 @@ pub fn list_tasks(
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::ToSql> = bound_params.iter().map(|b| b.as_ref()).collect();
 
-    let rows = stmt.query_map(refs.as_slice(), |row| row_to_task(row))?;
+    let rows = stmt.query_map(refs.as_slice(), row_to_task)?;
     rows.map(|r| r.context("reading task row")).collect()
 }
 

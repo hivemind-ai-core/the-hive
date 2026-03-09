@@ -137,16 +137,14 @@ async fn connect_and_listen(
                     _ => false,
                 };
 
-                if state_changed {
-                    if tx.send(StateUpdate {
-                        agents: agents.clone(),
-                        tasks: tasks.clone(),
-                        topics: topics.clone(),
-                        topic_detail_id: topic_detail_id.clone(),
-                        topic_comments: topic_comments.clone(),
-                    }).is_err() {
-                        return Ok(()); // TUI has exited
-                    }
+                if state_changed && tx.send(StateUpdate {
+                    agents: agents.clone(),
+                    tasks: tasks.clone(),
+                    topics: topics.clone(),
+                    topic_detail_id: topic_detail_id.clone(),
+                    topic_comments: topic_comments.clone(),
+                }).is_err() {
+                    return Ok(()); // TUI has exited
                 }
             }
 

@@ -49,7 +49,7 @@ pub async fn run(
                 backoff = (backoff * 2).min(BACKOFF_MAX);
             }
             // Server returns null result (JSON null deserializes to Option::None) when no task is ready.
-            Some(msg) if msg.error.is_none() && msg.result.as_ref().map_or(true, |v| v.is_null()) => {
+            Some(msg) if msg.error.is_none() && msg.result.as_ref().is_none_or(|v| v.is_null()) => {
                 // No task available — check for unread push messages and execute if present.
                 info!("No task available, checking push messages...");
                 handle_idle_push_messages(&agent_id, &coding_agent, &cmd_tx, &pending).await;

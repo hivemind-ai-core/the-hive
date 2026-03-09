@@ -127,7 +127,13 @@ pub struct Agent {
     pub tags: Vec<String>,
     pub connected_at: Option<DateTime<Utc>>,
     pub last_seen_at: Option<DateTime<Utc>>,
+    /// Maximum number of concurrent tasks this agent can handle.
+    /// Defaults to 1. Server assigns work when active_tasks < capacity_max.
+    #[serde(default = "default_capacity_max")]
+    pub capacity_max: u8,
 }
+
+fn default_capacity_max() -> u8 { 1 }
 
 /// API request/response wrapper
 #[derive(Debug, Clone, Serialize, Deserialize)]

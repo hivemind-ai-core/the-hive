@@ -35,7 +35,7 @@ pub fn pending_messages(pool: &DbPool, to_agent_id: &str) -> Result<Vec<PushMess
          FROM push_messages WHERE to_agent_id = ?1 AND delivered = 0
          ORDER BY created_at ASC",
     )?;
-    let rows = stmt.query_map(params![to_agent_id], |row| row_to_message(row))?;
+    let rows = stmt.query_map(params![to_agent_id], row_to_message)?;
     rows.map(|r| r.context("reading push message row"))
         .collect()
 }
@@ -81,7 +81,7 @@ pub fn list_agents(pool: &DbPool) -> Result<Vec<Agent>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, tags, connected_at, last_seen_at FROM agents ORDER BY name ASC",
     )?;
-    let rows = stmt.query_map([], |row| row_to_agent(row))?;
+    let rows = stmt.query_map([], row_to_agent)?;
     rows.map(|r| r.context("reading agent row"))
         .collect()
 }
@@ -123,5 +123,6 @@ fn row_to_agent(row: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
         tags,
         connected_at: connected_at.and_then(|s| s.parse().ok()),
         last_seen_at: last_seen_at.and_then(|s| s.parse().ok()),
+        capacity_max: 1,
     })
 }

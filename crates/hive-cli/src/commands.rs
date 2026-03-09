@@ -271,7 +271,7 @@ pub async fn status(project_dir: &Path) -> Result<()> {
         names.push(containers::agent_name(id, &agent.name));
     }
 
-    println!("{:<35} {:<15} {}", "CONTAINER", "STATUS", "ID");
+    println!("{:<35} {:<15} ID", "CONTAINER", "STATUS");
     println!("{}", "-".repeat(65));
 
     for name in &names {
@@ -426,7 +426,7 @@ fn warn_missing_credentials(cfg: &Config, project_dir: &Path) {
     let has_key = |key: &str| {
         dotenv_content.lines().any(|l| {
             l.trim_start().starts_with(key) && l.contains('=') && {
-                let v = l.splitn(2, '=').nth(1).unwrap_or("").trim();
+                let v = l.split_once('=').map(|(_, r)| r).unwrap_or("").trim();
                 !v.is_empty()
             }
         })

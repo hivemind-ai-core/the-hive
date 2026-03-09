@@ -87,7 +87,7 @@ pub struct LoggingConfig {
     pub level: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NetworkConfig {
     /// Block agent containers from reaching the internet (internal Docker network).
@@ -113,11 +113,6 @@ impl Default for Config {
     }
 }
 
-impl Default for NetworkConfig {
-    fn default() -> Self {
-        Self { isolate: false }
-    }
-}
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -172,12 +167,8 @@ impl Default for LoggingConfig {
 /// Add version-specific migration steps inside the match arms as the format evolves.
 pub fn migrate_config(mut config: Config) -> Config {
     // Walk through each version step so migrations compose correctly.
-    #[allow(clippy::match_single_binding)]
-    match config.version {
-        0 => {
-            // v0 → v1: no structural changes; just stamp the version.
-        }
-        _ => {} // Already up-to-date or unknown future version.
+    if config.version == 0 {
+        // v0 → v1: no structural changes; just stamp the version.
     }
     config.version = CONFIG_VERSION;
     config

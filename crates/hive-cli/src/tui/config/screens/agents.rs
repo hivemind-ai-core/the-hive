@@ -114,8 +114,7 @@ fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize)
     f.render_widget(block, area);
 
     let field_count = agent_field_count(agent);
-    let row_constraints: Vec<Constraint> = std::iter::repeat(Constraint::Length(1))
-        .take(field_count)
+    let row_constraints: Vec<Constraint> = std::iter::repeat_n(Constraint::Length(1), field_count)
         .chain(std::iter::once(Constraint::Min(0)))
         .collect();
     let rows = Layout::vertical(row_constraints).split(inner);

@@ -35,6 +35,7 @@ pub fn register(pool: &DbPool, params: Option<Value>) -> Result<Value> {
         tags: p.tags,
         connected_at: Some(now),
         last_seen_at: Some(now),
+        capacity_max: 1,
     };
     db_comm::upsert_agent(pool, &agent)?;
 

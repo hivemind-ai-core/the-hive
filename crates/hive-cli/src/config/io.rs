@@ -60,13 +60,10 @@ pub fn load_global() -> GlobalConfig {
     if !path.exists() {
         return GlobalConfig::default();
     }
-    match std::fs::read_to_string(&path)
+    std::fs::read_to_string(&path)
         .context("")
         .and_then(|raw| toml::from_str(&raw).context(""))
-    {
-        Ok(cfg) => cfg,
-        Err(_) => GlobalConfig::default(),
-    }
+        .unwrap_or_default()
 }
 
 /// Write global config to its standard path, creating parent dirs as needed.

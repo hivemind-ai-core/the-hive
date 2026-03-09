@@ -44,7 +44,7 @@ pub fn list_topics(pool: &DbPool) -> Result<Vec<Topic>> {
         "SELECT id, title, content, creator_agent_id, created_at, last_updated_at
          FROM topics ORDER BY last_updated_at DESC",
     )?;
-    let rows = stmt.query_map([], |row| row_to_topic(row))?;
+    let rows = stmt.query_map([], row_to_topic)?;
     rows.map(|r| r.context("reading topic row"))
         .collect()
 }
@@ -57,7 +57,7 @@ pub fn list_topics_since(pool: &DbPool, since_unix: i64) -> Result<Vec<Topic>> {
          FROM topics WHERE CAST(strftime('%s', last_updated_at) AS INTEGER) > ?1
          ORDER BY last_updated_at DESC",
     )?;
-    let rows = stmt.query_map(params![since_unix], |row| row_to_topic(row))?;
+    let rows = stmt.query_map(params![since_unix], row_to_topic)?;
     rows.map(|r| r.context("reading topic row")).collect()
 }
 
@@ -90,7 +90,7 @@ pub fn get_comments(pool: &DbPool, topic_id: &str) -> Result<Vec<Comment>> {
         "SELECT id, topic_id, content, creator_agent_id, created_at
          FROM comments WHERE topic_id = ?1 ORDER BY created_at ASC",
     )?;
-    let rows = stmt.query_map(params![topic_id], |row| row_to_comment(row))?;
+    let rows = stmt.query_map(params![topic_id], row_to_comment)?;
     rows.map(|r| r.context("reading comment row"))
         .collect()
 }

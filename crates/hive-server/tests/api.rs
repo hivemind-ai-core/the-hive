@@ -750,9 +750,10 @@ async fn test_push_ack_missing_message_ids_returns_error() {
 // ── push delivery tests ───────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn test_push_live_delivery_marks_delivered() {
+async fn test_push_live_delivery_still_in_list_until_acked() {
     // When receiver is connected, the push is delivered immediately over WS
-    // and should NOT appear in push.list (already marked delivered).
+    // but remains in push.list until explicitly ack'd — live delivery is
+    // best-effort and only push.ack is authoritative.
     let addr = start_server().await;
     let mut sender = connect(addr, "sender").await;
     let mut receiver = connect(addr, "receiver").await;
@@ -785,12 +786,20 @@ async fn test_push_live_delivery_marks_delivered() {
 
     assert_eq!(push_received.params.unwrap()["content"], "live hello");
 
-    // push.list should be empty — already delivered.
+    // push.list still returns the message — only push.ack marks it delivered.
     let resp = call(&mut receiver, "push.list", serde_json::json!({})).await;
     assert!(resp.error.is_none());
     let arr = resp.result.unwrap();
     let still_pending = arr.as_array().unwrap().iter().any(|m| m["id"] == msg_id);
-    assert!(!still_pending, "live-delivered message must not appear in push.list");
+    assert!(still_pending, "live-delivered message must still appear in push.list until ack'd");
+
+    // After ack, it disappears.
+    let ack = call(&mut receiver, "push.ack", serde_json::json!({ "message_ids": [msg_id] })).await;
+    assert!(ack.error.is_none());
+    let resp2 = call(&mut receiver, "push.list", serde_json::json!({})).await;
+    let arr2 = resp2.result.unwrap();
+    let after_ack = arr2.as_array().unwrap().iter().any(|m| m["id"] == msg_id);
+    assert!(!after_ack, "ack'd message must not appear in push.list");
 }
 
 #[tokio::test]
@@ -1156,10 +1165,10 @@ async fn test_task_update_invalid_transitions() {
     let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "done" })).await;
     assert!(resp.error.is_some(), "pending→done should be rejected");
 
-    // in-progress → pending is INVALID
+    // in-progress → pending is VALID (operator reset)
     call(&mut ws, "task.get_next", serde_json::json!({})).await;
     let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "pending" })).await;
-    assert!(resp.error.is_some(), "in-progress→pending should be rejected");
+    assert!(resp.error.is_none(), "in-progress→pending should be allowed (operator reset)");
 }
 
 #[tokio::test]

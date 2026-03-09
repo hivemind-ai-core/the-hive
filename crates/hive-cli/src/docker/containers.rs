@@ -248,6 +248,7 @@ pub async fn create_agents(docker: &Docker, cfg: &Config, project_dir: &Path) ->
     Ok(ids)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_agent_container(
     docker: &Docker,
     id: &str,

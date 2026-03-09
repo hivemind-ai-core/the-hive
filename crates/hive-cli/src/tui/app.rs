@@ -517,6 +517,7 @@ fn render_task_fields(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_two_field_dialog(
     f: &mut Frame, area: Rect, title: &str,
     label1: &str, val1: &str, label2: &str, val2: &str, first_active: bool,
