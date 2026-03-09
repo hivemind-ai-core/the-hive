@@ -78,37 +78,41 @@ pub fn build_prompt(task: &Task, agent_id: &str, messages: &[PushMessage]) -> St
 /// Claude Code and Kilo support Streamable HTTP MCP transport via a `url` entry.
 /// We point them directly at the hive-agent's HTTP MCP server — no bridge needed.
 fn write_mcp_configs(mcp_port: u16) {
-    let url_entry = serde_json::json!({
-        "url": format!("http://127.0.0.1:{mcp_port}/mcp")
-    });
+    let hive_url = format!("http://127.0.0.1:{mcp_port}/mcp");
 
-    // Claude Code: .mcp.json in project root
-    let claude_cfg = serde_json::json!({ "mcpServers": { "hive": url_entry } });
+    // Claude Code supports Streamable HTTP via the `url` field.
+    let claude_cfg = serde_json::json!({
+        "mcpServers": { "hive": { "url": hive_url } }
+    });
     let content = serde_json::to_string_pretty(&claude_cfg).unwrap_or_default();
     if let Err(e) = std::fs::write(".mcp.json", &content) {
         warn!("Failed to write .mcp.json: {e}");
     }
 
-    // Kilo: .kilocode/mcp.json — merge the hive entry into any existing config.
-    let kilocode_dir = std::path::Path::new(".kilocode");
-    if let Err(e) = std::fs::create_dir_all(kilocode_dir) {
-        warn!("Failed to create .kilocode/: {e}");
-        return;
-    }
-    let kilo_path = kilocode_dir.join("mcp.json");
+    // Kilo CLI reads kilo.json (project root). It supports type:"remote" for HTTP MCP directly.
+    let kilo_path = std::path::Path::new("kilo.json");
     let mut kilo_cfg: serde_json::Value = kilo_path
         .exists()
-        .then(|| std::fs::read_to_string(&kilo_path).ok())
+        .then(|| std::fs::read_to_string(kilo_path).ok())
         .flatten()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({ "mcpServers": {} }));
+        .unwrap_or_else(|| serde_json::json!({}));
 
-    if let Some(servers) = kilo_cfg.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-        servers.insert("hive".to_string(), url_entry);
+    let mcp = kilo_cfg
+        .as_object_mut()
+        .unwrap()
+        .entry("mcp")
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(servers) = mcp.as_object_mut() {
+        servers.insert("hive".to_string(), serde_json::json!({
+            "type": "remote",
+            "url": hive_url,
+            "enabled": true
+        }));
     }
     let kilo_content = serde_json::to_string_pretty(&kilo_cfg).unwrap_or_default();
-    if let Err(e) = std::fs::write(&kilo_path, kilo_content) {
-        warn!("Failed to write .kilocode/mcp.json: {e}");
+    if let Err(e) = std::fs::write(kilo_path, kilo_content) {
+        warn!("Failed to write kilo.json: {e}");
     }
 }
 
@@ -193,6 +197,8 @@ pub async fn run(
             let combined = if stderr.is_empty() { stdout.clone() } else { format!("{stdout}{stderr}") };
             if exit_code == 0 {
                 info!("'{agent_bin}' finished successfully");
+                if !stdout.is_empty() { debug!("stdout: {}", stdout.trim()); }
+                if !stderr.is_empty() { debug!("stderr: {}", stderr.trim()); }
             } else {
                 warn!("'{agent_bin}' finished with exit code {exit_code}");
                 if !stderr.is_empty() { warn!("stderr: {}", stderr.trim()); }
@@ -288,15 +294,16 @@ pub async fn run_push_only(
             let exit_code = output.status.code().unwrap_or(-1);
             let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            let combined = if stderr.is_empty() { stdout } else { format!("{stdout}{stderr}") };
             if exit_code == 0 {
                 info!("'{agent_bin}' push-only run finished successfully");
+                if !stdout.is_empty() { debug!("stdout: {}", stdout.trim()); }
+                if !stderr.is_empty() { debug!("stderr: {}", stderr.trim()); }
             } else {
                 warn!("'{agent_bin}' push-only run finished with exit code {exit_code}");
-                if !combined.trim().is_empty() {
-                    warn!("output: {}", combined.trim());
-                }
+                if !stderr.is_empty() { warn!("stderr: {}", stderr.trim()); }
+                if !stdout.is_empty() { warn!("stdout: {}", stdout.trim()); }
             }
+            let combined = if stderr.is_empty() { stdout } else { format!("{stdout}{stderr}") };
             (exit_code, combined)
         }
         Ok(Err(e)) => {
