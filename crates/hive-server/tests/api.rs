@@ -1492,6 +1492,70 @@ async fn test_agent_status_idle_triggers_dispatch() {
     assert_eq!(assign2.params.unwrap()["task"]["title"], "Task 2");
 }
 
+#[tokio::test]
+async fn test_untagged_task_dispatched_to_tagged_agent() {
+    // A task without tags should be dispatched to any registered agent,
+    // even one that has a specific tag.
+    let addr = start_server().await;
+    let mut creator = connect(addr, "creator").await;
+    let mut agent = connect(addr, "agent-rust").await;
+
+    call(&mut agent, "agent.register", serde_json::json!({
+        "id": "agent-rust", "name": "Rust Agent", "tags": ["rust"], "capacity_max": 1
+    })).await;
+
+    // Task with NO tags — should be claimable by any agent.
+    call(&mut creator, "task.create", serde_json::json!({ "title": "Untagged work" })).await;
+
+    let assign = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            loop {
+                let raw = agent.next().await.unwrap().unwrap();
+                if let Message::Text(t) = raw {
+                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                    if msg.method.as_deref() == Some("task.assign") { return msg; }
+                }
+            }
+        }
+    ).await.expect("timed out: tagged agent should receive untagged task");
+
+    assert_eq!(assign.params.unwrap()["task"]["title"], "Untagged work");
+}
+
+#[tokio::test]
+async fn test_tagged_task_not_dispatched_to_wrong_agent() {
+    // A task tagged "python" should NOT be dispatched to an agent tagged "rust".
+    let addr = start_server().await;
+    let mut creator = connect(addr, "creator").await;
+    let mut rust_agent = connect(addr, "agent-rust").await;
+
+    call(&mut rust_agent, "agent.register", serde_json::json!({
+        "id": "agent-rust", "name": "Rust Agent", "tags": ["rust"], "capacity_max": 1
+    })).await;
+
+    // Task explicitly tagged "python" — should NOT go to "rust" agent.
+    call(&mut creator, "task.create", serde_json::json!({
+        "title": "Python work", "tags": ["python"]
+    })).await;
+
+    // Wait briefly; rust agent should NOT receive task.assign.
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(300),
+        async {
+            loop {
+                let raw = rust_agent.next().await.unwrap().unwrap();
+                if let Message::Text(t) = raw {
+                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                    if msg.method.as_deref() == Some("task.assign") { return true; }
+                }
+            }
+        }
+    ).await;
+
+    assert!(result.is_err(), "rust agent should NOT receive python-tagged task");
+}
+
 // ── Internal test helpers ─────────────────────────────────────────────────────
 // These re-export internal functions needed by tests. In Rust, integration tests
 // in tests/ can only access pub items. We expose helpers via a test-only module

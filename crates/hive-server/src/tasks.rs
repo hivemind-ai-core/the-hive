@@ -69,11 +69,50 @@ pub fn update_task(pool: &DbPool, task: &Task) -> Result<()> {
     Ok(())
 }
 
+/// List pending tasks for dispatch with agent-tag semantics:
+/// - No tag: return all pending tasks.
+/// - Tag "X": return pending tasks tagged "X" OR tasks with no tags (untagged work).
+///   Tasks with an explicit tag are only eligible for agents carrying that tag.
+fn list_pending_for_dispatch(pool: &DbPool, tag: Option<&str>) -> Result<Vec<Task>> {
+    let conn = pool.get()?;
+    let sql = if tag.is_some() {
+        "SELECT id, title, description, status, assigned_agent_id, tags, result, position, created_at, updated_at
+         FROM tasks
+         WHERE status = 'pending'
+           AND (tags = '[]' OR tags IS NULL OR tags = ''
+                OR EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?))
+         ORDER BY position ASC, created_at ASC"
+    } else {
+        "SELECT id, title, description, status, assigned_agent_id, tags, result, position, created_at, updated_at
+         FROM tasks
+         WHERE status = 'pending'
+         ORDER BY position ASC, created_at ASC"
+    };
+
+    let mut stmt = conn.prepare(sql)?;
+    let rows: Vec<Task> = if let Some(t) = tag {
+        stmt.query_map(rusqlite::params![t], row_to_task)?
+            .filter_map(|r| r.ok())
+            .collect()
+    } else {
+        stmt.query_map([], row_to_task)?
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+    Ok(rows)
+}
+
 /// Find the next pending task for an agent, respecting dependencies and optional tag filter.
 /// Assigns the task to `agent_id` and sets status to `in-progress`.
+///
+/// Dispatch tag semantics (different from task.list):
+/// - If `tag` is None: claim any pending task regardless of tags.
+/// - If `tag` is Some("rust"): claim tasks tagged "rust" OR tasks with NO tags.
+///   Tasks without tags are untagged work, claimable by any agent.
+///   Tasks with an explicit tag are ONLY claimable by an agent carrying that tag.
 pub fn get_next(pool: &DbPool, agent_id: &str, tag: Option<&str>) -> Result<Option<Task>> {
-    // Fetch all pending tasks, ordered by position then created_at.
-    let pending = list_tasks(pool, Some("pending"), tag, None)?;
+    // Fetch pending tasks with dispatch-specific tag semantics.
+    let pending = list_pending_for_dispatch(pool, tag)?;
 
     // For each candidate check that all its dependencies are `done`.
     let conn = pool.get()?;
