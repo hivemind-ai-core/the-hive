@@ -156,7 +156,7 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
         "topic.list"    => handle(&msg.id, handlers::message_board::list(&state.db, msg.params)),
         "topic.list_new" => handle(&msg.id, handlers::message_board::list_new(&state.db, msg.params)),
         "topic.get"     => handle(&msg.id, handlers::message_board::get(&state.db, msg.params)),
-        "topic.comment" => handle(&msg.id, handlers::message_board::comment(&state.db, msg.params)),
+        "topic.comment" => handle(&msg.id, handlers::message_board::comment(&state.db, &state.agents, msg.params)),
         "topic.wait"    => handle(&msg.id, handlers::message_board::wait(&state.db, msg.params).await),
         "agent.register"  => handle(&msg.id, handlers::agents::register(&state.db, &state.agents, msg.params)),
         "agent.list"      => handle(&msg.id, handlers::agents::list(&state.db)),

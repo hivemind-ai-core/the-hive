@@ -12,7 +12,9 @@ mod mcp;
 mod session;
 mod status;
 
-use hive_core::types::Task;
+use std::sync::atomic::Ordering;
+
+use hive_core::types::{PushMessage, Task};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -81,8 +83,20 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 "push.notify" => {
-                    if let Some(params) = &msg.params {
-                        info!("Push notification received: {params}");
+                    let messages: Vec<PushMessage> = msg.params
+                        .as_ref()
+                        .and_then(|p| p.get("messages"))
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default();
+
+                    if agent.active_tasks.load(Ordering::SeqCst) == 0 {
+                        info!("Push notification received while idle — spawning response ({} message(s))", messages.len());
+                        agent.on_push_notify(messages);
+                    } else {
+                        info!("Push notification received while busy — caching {} message(s)", messages.len());
+                        if let Ok(mut cache) = agent.push_cache.lock() {
+                            cache.extend(messages);
+                        }
                     }
                 }
                 "tasks.updated" | "agents.updated" | "topics.updated" => {

@@ -843,6 +843,152 @@ async fn test_push_offline_delivery_flow() {
     assert!(!arr.as_array().unwrap().iter().any(|m| m["id"] == msg_id), "acked message must be gone");
 }
 
+// ── @mention notifications ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_at_mention_sends_push_notification() {
+    // Posting a comment with @receiver triggers a push notification to that agent.
+    let addr = start_server().await;
+    let mut commenter = connect(addr, "commenter").await;
+    let mut receiver = connect(addr, "receiver").await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+    // Create a topic.
+    let resp = call(&mut commenter, "topic.create", serde_json::json!({
+        "title": "Coordination",
+        "content": "Kicking off",
+        "creator_agent_id": "commenter",
+    })).await;
+    assert!(resp.error.is_none());
+    let topic_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
+
+    // Post a comment that @mentions receiver.
+    let resp = call(&mut commenter, "topic.comment", serde_json::json!({
+        "topic_id": topic_id,
+        "content": "Hey @receiver, please review this.",
+        "creator_agent_id": "commenter",
+    })).await;
+    assert!(resp.error.is_none());
+
+    // Receiver should get a push.notify WS message.
+    let push_msg = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            loop {
+                let raw = receiver.next().await.unwrap().unwrap();
+                if let Message::Text(t) = raw {
+                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                    if msg.msg_type == MessageType::Push
+                        && msg.method.as_deref() == Some("push.notify")
+                    {
+                        return msg;
+                    }
+                }
+            }
+        }
+    ).await.expect("timed out waiting for @mention push notification");
+
+    let params = push_msg.params.unwrap();
+    let content = params["messages"][0]["content"].as_str().unwrap();
+    assert!(content.contains("[notification]"), "notification marker missing: {content}");
+    assert!(content.contains(&topic_id), "topic id missing from notification: {content}");
+    assert!(content.contains("commenter"), "commenter attribution missing: {content}");
+
+    // The notification must also appear in push.list (unacked).
+    let resp = call(&mut receiver, "push.list", serde_json::json!({})).await;
+    let msgs = resp.result.unwrap();
+    let found = msgs.as_array().unwrap().iter().any(|m| {
+        m["content"].as_str().map(|c| c.contains("[notification]")).unwrap_or(false)
+    });
+    assert!(found, "notification must be in push.list until acked");
+}
+
+#[tokio::test]
+async fn test_at_mention_self_is_skipped() {
+    // An agent @mentioning itself should not receive a push notification.
+    let addr = start_server().await;
+    let mut agent = connect(addr, "self-agent").await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+    let resp = call(&mut agent, "topic.create", serde_json::json!({
+        "title": "Solo topic",
+        "content": "Thinking out loud",
+        "creator_agent_id": "self-agent",
+    })).await;
+    assert!(resp.error.is_none());
+    let topic_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
+
+    let resp = call(&mut agent, "topic.comment", serde_json::json!({
+        "topic_id": topic_id,
+        "content": "I am @self-agent and I note this.",
+        "creator_agent_id": "self-agent",
+    })).await;
+    assert!(resp.error.is_none());
+
+    // No push notification should arrive (give it a moment to confirm absence).
+    let got_notif = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        async {
+            loop {
+                let raw = agent.next().await.unwrap().unwrap();
+                if let Message::Text(t) = raw {
+                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                    if msg.msg_type == MessageType::Push
+                        && msg.method.as_deref() == Some("push.notify")
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    ).await;
+    assert!(got_notif.is_err(), "self-mention must not produce a push notification");
+}
+
+#[tokio::test]
+async fn test_at_mention_multiple_agents() {
+    // A comment with two @mentions produces two separate notifications.
+    let addr = start_server().await;
+    let mut commenter = connect(addr, "tagger").await;
+    let mut alice = connect(addr, "alice").await;
+    let mut bob = connect(addr, "bob").await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+    let resp = call(&mut commenter, "topic.create", serde_json::json!({
+        "title": "Team topic",
+        "content": "Hello team",
+        "creator_agent_id": "tagger",
+    })).await;
+    let topic_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
+
+    call(&mut commenter, "topic.comment", serde_json::json!({
+        "topic_id": topic_id,
+        "content": "@alice and @bob, please check this.",
+        "creator_agent_id": "tagger",
+    })).await;
+
+    // Both alice and bob should get notifications.
+    async fn wait_for_notify(ws: &mut (impl StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin)) -> bool {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let raw = ws.next().await.unwrap().unwrap();
+                if let Message::Text(t) = raw {
+                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                    if msg.msg_type == MessageType::Push && msg.method.as_deref() == Some("push.notify") {
+                        return true;
+                    }
+                }
+            }
+        }).await.is_ok()
+    }
+
+    assert!(wait_for_notify(&mut alice).await, "alice must receive push notification");
+    assert!(wait_for_notify(&mut bob).await, "bob must receive push notification");
+}
+
 // ── task.split: chain, non-existent parent, empty subtasks ───────────────────
 
 #[tokio::test]

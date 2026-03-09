@@ -45,6 +45,58 @@ struct TaskCompleteParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct TaskCreateParams {
+    title: String,
+    description: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct TaskListParams {
+    /// Filter by status: "pending", "in_progress", "done", or "cancelled"
+    status: Option<String>,
+    /// Filter by tag (exact match)
+    tag: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TaskGetParams {
+    id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TaskUpdateParams {
+    id: String,
+    description: Option<String>,
+    tags: Option<Vec<String>>,
+    /// New status: "pending", "in_progress", "done", or "cancelled"
+    status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SubtaskSpec {
+    title: String,
+    description: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TaskSplitParams {
+    /// ID of the task to split (must be your currently assigned task)
+    id: String,
+    /// Ordered list of subtasks; they will be chained so each depends on the previous
+    subtasks: Vec<SubtaskSpec>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TaskSetDependencyParams {
+    /// The task that must wait
+    task_id: String,
+    /// The task that must complete first
+    depends_on_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct TopicCreateParams {
     title: String,
     content: String,
@@ -125,6 +177,95 @@ impl HiveMcpServer {
             .map_err(|e| e.to_string())
     }
 
+    /// Create a new task. Use this to add work items for yourself or other agents.
+    #[tool(name = "task.create", description = "Create a new pending task. Optionally set description and tags to route it to a specific agent.")]
+    async fn task_create(
+        &self,
+        Parameters(p): Parameters<TaskCreateParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({
+            "title": p.title,
+            "description": p.description,
+            "tags": p.tags,
+        });
+        super::tools::tasks::create(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// List tasks, optionally filtered by status or tag.
+    #[tool(name = "task.list", description = "Browse all tasks. Filter by status (pending/in_progress/done/cancelled) or tag.")]
+    async fn task_list(
+        &self,
+        Parameters(p): Parameters<TaskListParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({ "status": p.status, "tag": p.tag });
+        super::tools::tasks::list(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Get a specific task by ID.
+    #[tool(name = "task.get", description = "Fetch a specific task by its ID.")]
+    async fn task_get(
+        &self,
+        Parameters(p): Parameters<TaskGetParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({ "id": p.id });
+        super::tools::tasks::get(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Update a task's description, tags, or status.
+    #[tool(name = "task.update", description = "Update a task's description, tags, or status. Use status=pending to un-claim a task.")]
+    async fn task_update(
+        &self,
+        Parameters(p): Parameters<TaskUpdateParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({
+            "id": p.id,
+            "description": p.description,
+            "tags": p.tags,
+            "status": p.status,
+        });
+        super::tools::tasks::update(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Split your current task into ordered subtasks. The original task is cancelled.
+    #[tool(name = "task.split", description = "Break a task into ordered subtasks. Each subtask depends on the previous. The original task is cancelled and subtasks are dispatched in sequence.")]
+    async fn task_split(
+        &self,
+        Parameters(p): Parameters<TaskSplitParams>,
+    ) -> Result<String, String> {
+        let subtasks: Vec<serde_json::Value> = p.subtasks.into_iter().map(|s| serde_json::json!({
+            "title": s.title,
+            "description": s.description,
+            "tags": s.tags,
+        })).collect();
+        let params = serde_json::json!({ "id": p.id, "subtasks": subtasks });
+        super::tools::tasks::split(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Declare that one task must complete before another can start.
+    #[tool(name = "task.set_dependency", description = "Make task_id wait for depends_on_id to complete before it can be dispatched.")]
+    async fn task_set_dependency(
+        &self,
+        Parameters(p): Parameters<TaskSetDependencyParams>,
+    ) -> Result<String, String> {
+        let params = serde_json::json!({
+            "task_id": p.task_id,
+            "depends_on_id": p.depends_on_id,
+        });
+        super::tools::tasks::set_dependency(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
     /// Create a new discussion topic on the message board.
     #[tool(name = "topic.create", description = "Create a new discussion topic on the message board")]
     async fn topic_create(
@@ -189,6 +330,14 @@ impl HiveMcpServer {
             "timeout_secs": p.timeout_secs,
         });
         super::tools::topics::wait(&self.state, Some(params)).await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// List all agents registered with the hive.
+    #[tool(name = "agent.list", description = "List all agents known to the hive. Use this to discover agent IDs for push.send or @mention in topic comments.")]
+    async fn agent_list(&self) -> Result<String, String> {
+        super::tools::agents::list(&self.state, None).await
             .map(|v| v.to_string())
             .map_err(|e| e.to_string())
     }

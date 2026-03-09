@@ -1,11 +1,16 @@
 //! Handlers for topic.* WS methods.
 
 use anyhow::Result;
-use hive_core::types::Topic;
+use hive_core::types::{PushMessage, Topic};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{db::DbPool, message_board as db_mb};
+use crate::{
+    agent_registry::{self, AgentRegistry},
+    communication as db_comm,
+    db::DbPool,
+    message_board as db_mb,
+};
 
 #[derive(Deserialize)]
 struct CreateParams {
@@ -39,7 +44,7 @@ pub fn list_new(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     Ok(serde_json::to_value(&topics)?)
 }
 
-pub fn comment(pool: &DbPool, params: Option<Value>) -> Result<Value> {
+pub fn comment(pool: &DbPool, registry: &AgentRegistry, params: Option<Value>) -> Result<Value> {
     use hive_core::types::Comment;
     #[derive(serde::Deserialize)]
     struct CommentParams {
@@ -50,7 +55,45 @@ pub fn comment(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let p: CommentParams = serde_json::from_value(params.unwrap_or(Value::Null))?;
     let comment = Comment::new(p.topic_id, p.content, p.creator_agent_id);
     db_mb::insert_comment(pool, &comment)?;
+
+    // Send @mention notifications.
+    let commenter = comment.creator_agent_id.as_deref().unwrap_or("unknown");
+    for mentioned_id in extract_mentions(&comment.content) {
+        // Skip self-mentions.
+        if comment.creator_agent_id.as_deref() == Some(&*mentioned_id) {
+            continue;
+        }
+        let notif = PushMessage::new(
+            mentioned_id.clone(),
+            format!(
+                "[notification] You have been tagged in topic #{} by agent {}",
+                comment.topic_id, commenter
+            ),
+            comment.creator_agent_id.clone(),
+        );
+        // Best-effort: ignore DB errors so the comment still succeeds.
+        let _ = db_comm::insert_message(pool, &notif);
+        if let Ok(val) = serde_json::to_value(std::slice::from_ref(&notif)) {
+            agent_registry::notify_agent(registry, &mentioned_id, val);
+        }
+    }
+
     Ok(serde_json::to_value(&comment)?)
+}
+
+/// Extract `@agent-id` mentions from comment content.
+/// Strips trailing punctuation so `@agent,` and `@agent.` work correctly.
+fn extract_mentions(content: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for word in content.split_whitespace() {
+        if let Some(id) = word.strip_prefix('@') {
+            let id = id.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
+            if !id.is_empty() {
+                out.push(id.to_string());
+            }
+        }
+    }
+    out
 }
 
 /// Wait until the comment count for a topic exceeds `since_count`.
