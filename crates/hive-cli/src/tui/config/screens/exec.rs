@@ -1,7 +1,7 @@
-//! Exec config screen: run_prefixes and command aliases.
+//! Exec config screen: `run_prefixes` and command aliases.
 //!
 //! Fields (in order):
-//!   0   — run_prefixes (comma-separated)
+//!   0   — `run_prefixes` (comma-separated)
 //!   1.. — one field per command alias sorted by key ("test = pnpm test")
 
 use crossterm::event::{KeyCode, KeyModifiers};

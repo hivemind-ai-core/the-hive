@@ -1,6 +1,8 @@
 //! Session ID persistence for coding agent continuity.
 //!
-//! Session files are stored at `/app/.hive/agents/{agent_id}/session`.
+//! Session files are stored at `{HIVE_DATA_DIR}/.hive/agents/{agent_id}/session`.
+//! `HIVE_DATA_DIR` defaults to `/app` when not set.
+//!
 //! They contain the session ID returned by the previous coding agent run,
 //! allowing the next run to resume from where it left off.
 
@@ -9,8 +11,12 @@ use std::path::PathBuf;
 use anyhow::Result;
 use tracing::{info, warn};
 
+/// Default base directory when `HIVE_DATA_DIR` is not set.
+const DEFAULT_DATA_DIR: &str = "/app";
+
 fn session_path(agent_id: &str) -> PathBuf {
-    PathBuf::from(format!("/app/.hive/agents/{agent_id}/session"))
+    let base = std::env::var("HIVE_DATA_DIR").unwrap_or_else(|_| DEFAULT_DATA_DIR.to_string());
+    PathBuf::from(format!("{base}/.hive/agents/{agent_id}/session"))
 }
 
 /// Load the stored session ID for this agent, if any.

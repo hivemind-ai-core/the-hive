@@ -42,7 +42,7 @@ pub fn send(
 
     // Attempt live delivery via push.notify. The agent will ack it explicitly.
     if let Ok(messages_val) = serde_json::to_value(std::slice::from_ref(&msg)) {
-        agent_registry::notify_agent(registry, &p.to_agent_id, messages_val);
+        agent_registry::notify_agent(registry, &p.to_agent_id, &messages_val);
     }
 
     Ok(serde_json::json!({ "id": msg.id }))
@@ -55,6 +55,7 @@ pub fn list(pool: &DbPool, agent_id: &str) -> Result<Value> {
 }
 
 /// Mark a batch of messages as delivered (explicit ACK from agent).
+#[allow(clippy::needless_pass_by_value)] // Params are passed owned from the WS dispatcher
 pub fn ack(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let ids: Vec<String> = params
         .as_ref()

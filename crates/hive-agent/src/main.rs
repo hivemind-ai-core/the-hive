@@ -12,7 +12,7 @@ mod mcp;
 mod session;
 mod status;
 
-use std::sync::atomic::Ordering;
+use std::sync::{atomic::Ordering, Arc};
 
 use hive_core::types::{PushMessage, Task};
 use tracing::info;
@@ -59,9 +59,9 @@ async fn main() -> anyhow::Result<()> {
     status::report(&cmd_tx, 0, &last_status);
 
     // Watchdog: send agent.heartbeat if no status has been sent for 30s.
-    status::spawn_watchdog(cmd_tx.clone(), last_status.clone());
+    status::spawn_watchdog(cmd_tx.clone(), Arc::clone(&last_status));
 
-    start_mcp_server(&agent_id, &app_daemon_url, cmd_tx.clone(), pending.clone());
+    start_mcp_server(&agent_id, &app_daemon_url, cmd_tx.clone(), Arc::clone(&pending));
 
     let agent = Agent::new(agent_id, coding_agent, cmd_tx.clone(), pending, last_status);
 
@@ -123,9 +123,9 @@ async fn main() -> anyhow::Result<()> {
 fn apply_kilo_auth() {
     let Ok(json_str) = std::env::var("KILO_PROVIDER_JSON") else { return };
     if json_str.is_empty() { return }
-    let home = match std::env::var("HOME").ok().map(std::path::PathBuf::from) {
-        Some(p) => p,
-        None => { tracing::warn!("KILO_PROVIDER_JSON set but HOME is unset — skipping"); return }
+    let Some(home) = std::env::var("HOME").ok().map(std::path::PathBuf::from) else {
+        tracing::warn!("KILO_PROVIDER_JSON set but HOME is unset — skipping");
+        return;
     };
     let dst = home.join(".kilocode/cli/config.json");
     if let Some(parent) = dst.parent() {
@@ -146,9 +146,9 @@ fn apply_kilo_auth() {
 fn apply_claude_auth() {
     let Ok(json_str) = std::env::var("CLAUDE_AUTH_JSON") else { return };
     if json_str.is_empty() { return }
-    let home = match std::env::var("HOME").ok().map(std::path::PathBuf::from) {
-        Some(p) => p,
-        None => { tracing::warn!("CLAUDE_AUTH_JSON set but HOME is unset — skipping"); return }
+    let Some(home) = std::env::var("HOME").ok().map(std::path::PathBuf::from) else {
+        tracing::warn!("CLAUDE_AUTH_JSON set but HOME is unset — skipping");
+        return;
     };
     let dst = home.join(".claude.json");
     if let Err(e) = std::fs::write(&dst, &json_str) {

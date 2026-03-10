@@ -1,4 +1,4 @@
-//! app_exec MCP tool: forward exec requests to the app-daemon.
+//! `app_exec` MCP tool: forward exec requests to the app-daemon.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

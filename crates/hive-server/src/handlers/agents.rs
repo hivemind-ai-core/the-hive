@@ -83,7 +83,7 @@ pub fn register(pool: &DbPool, registry: &AgentRegistry, params: Option<Value>) 
 /// Handle `agent.status { active_tasks }`.
 ///
 /// Updates in-memory registry. Triggers `try_dispatch` when the agent has
-/// capacity (active_tasks dropped below capacity_max).
+/// capacity (`active_tasks` dropped below `capacity_max`).
 pub fn status(registry: &AgentRegistry, _pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<Value> {
     let p: StatusParams = serde_json::from_value(params.unwrap_or(Value::Null))?;
 

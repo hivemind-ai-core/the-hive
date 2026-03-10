@@ -91,7 +91,7 @@ enum AuthAction {
     Status,
     /// Write an API key to .hive/.env or a specific agent's env block in config.toml
     SetKey {
-        /// Variable name (e.g. ANTHROPIC_API_KEY)
+        /// Variable name (e.g. `ANTHROPIC_API_KEY`)
         key: String,
         /// Key value
         value: String,
@@ -101,9 +101,9 @@ enum AuthAction {
     },
     /// Write a base URL to .hive/.env or a specific agent's env block in config.toml
     SetEndpoint {
-        /// Variable name (e.g. OPENAI_BASE_URL)
+        /// Variable name (e.g. `OPENAI_BASE_URL`)
         key: String,
-        /// Base URL (e.g. https://api.together.xyz/v1)
+        /// Base URL (e.g. <https://api.together.xyz/v1>)
         url: String,
         /// Write to a specific agent's env block instead of the shared .hive/.env
         #[arg(long)]

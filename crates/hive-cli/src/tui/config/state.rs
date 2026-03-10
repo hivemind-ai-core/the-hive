@@ -69,7 +69,7 @@ impl WizardScreen {
     }
 }
 
-/// Return value from a screen's handle() function.
+/// Return value from a screen's `handle()` function.
 pub enum WizardCmd {
     /// Keep running the wizard.
     Continue,

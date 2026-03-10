@@ -10,6 +10,10 @@ pub struct ExecutionResult {
     pub output: String,
 }
 
+/// Maximum wall-clock time allowed for a single coding-agent subprocess to run.
+/// 10 minutes is generous for most tasks; adjust if long-running tasks time out.
+const AGENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 const TOOL_GUIDE: &str = "\
 # Hive Coordination Tools
 
@@ -186,10 +190,10 @@ pub async fn run(
     debug!("Prompt preview: {preview}");
     trace!("Full prompt: {prompt}");
 
-    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+    // Use module-level AGENT_TIMEOUT.
     cmd.kill_on_drop(true);
 
-    let (exit_code, combined) = match tokio::time::timeout(TIMEOUT, cmd.output()).await {
+    let (exit_code, combined) = match tokio::time::timeout(AGENT_TIMEOUT, cmd.output()).await {
         Ok(Ok(output)) => {
             let exit_code = output.status.code().unwrap_or(-1);
             let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -286,10 +290,10 @@ pub async fn run_push_only(
     debug!("Prompt preview: {preview}");
     trace!("Full prompt: {prompt}");
 
-    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+    // Use module-level AGENT_TIMEOUT.
     cmd.kill_on_drop(true);
 
-    let (exit_code, combined) = match tokio::time::timeout(TIMEOUT, cmd.output()).await {
+    let (exit_code, combined) = match tokio::time::timeout(AGENT_TIMEOUT, cmd.output()).await {
         Ok(Ok(output)) => {
             let exit_code = output.status.code().unwrap_or(-1);
             let stdout = String::from_utf8_lossy(&output.stdout).into_owned();

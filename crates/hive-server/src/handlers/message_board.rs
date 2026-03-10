@@ -12,6 +12,18 @@ use crate::{
     message_board as db_mb,
 };
 
+/// Default value for the `since` timestamp filter in `topic.list_new`.
+/// 0 means "return all topics" (since Unix epoch).
+const DEFAULT_SINCE_TIMESTAMP: i64 = 0;
+
+/// Default value for the `since_count` parameter in topic.wait.
+/// 0 means "wait for any new comment" regardless of existing count.
+const DEFAULT_SINCE_COUNT: u64 = 0;
+
+/// Default timeout for topic.wait when the caller does not supply `timeout_secs`.
+/// 30 seconds is a reasonable upper bound for a long-poll request.
+const DEFAULT_WAIT_TIMEOUT_SECS: u64 = 30;
+
 #[derive(Deserialize)]
 struct CreateParams {
     title: String,
@@ -34,12 +46,13 @@ pub fn list(pool: &DbPool, _params: Option<Value>) -> Result<Value> {
     Ok(serde_json::to_value(&topics)?)
 }
 
+#[allow(clippy::needless_pass_by_value)] // Params are passed owned from the WS dispatcher
 pub fn list_new(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let since = params
         .as_ref()
         .and_then(|v| v.get("since"))
         .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+        .unwrap_or(DEFAULT_SINCE_TIMESTAMP);
     let topics = db_mb::list_topics_since(pool, since)?;
     Ok(serde_json::to_value(&topics)?)
 }
@@ -71,10 +84,12 @@ pub fn comment(pool: &DbPool, registry: &AgentRegistry, params: Option<Value>) -
             ),
             comment.creator_agent_id.clone(),
         );
-        // Best-effort: ignore DB errors so the comment still succeeds.
-        let _ = db_comm::insert_message(pool, &notif);
+        // Best-effort: the comment still succeeds even if notification storage fails.
+        if let Err(e) = db_comm::insert_message(pool, &notif) {
+            tracing::warn!(mentioned_agent = %mentioned_id, topic_id = %comment.topic_id, error = %e, "@mention notification DB insert failed");
+        }
         if let Ok(val) = serde_json::to_value(std::slice::from_ref(&notif)) {
-            agent_registry::notify_agent(registry, &mentioned_id, val);
+            agent_registry::notify_agent(registry, &mentioned_id, &val);
         }
     }
 
@@ -84,27 +99,31 @@ pub fn comment(pool: &DbPool, registry: &AgentRegistry, params: Option<Value>) -
 /// Extract `@agent-id` mentions from comment content.
 /// Strips trailing punctuation so `@agent,` and `@agent.` work correctly.
 fn extract_mentions(content: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for word in content.split_whitespace() {
-        if let Some(id) = word.strip_prefix('@') {
-            let id = id.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
-            if !id.is_empty() {
-                out.push(id.to_string());
-            }
-        }
-    }
-    out
+    content
+        .split_whitespace()
+        .filter_map(|word| {
+            let id = word
+                .strip_prefix('@')?
+                .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
+            if id.is_empty() { None } else { Some(id.to_string()) }
+        })
+        .collect()
 }
 
-/// Wait until the comment count for a topic exceeds `since_count`.
-/// Polls every second up to `timeout_secs` (default 30).
+/// Long-poll until the comment count for a topic exceeds `since_count`.
+///
+/// Polls the DB once per second. Returns the full topic and its comments as soon
+/// as `comments.len() > since_count`. If no new comments arrive within
+/// `timeout_secs` (default 30 s) the call returns an error.
+///
+/// Params: `{ "id": "<topic-id>", "since_count": <u64>, "timeout_secs": <u64> }`
 pub async fn wait(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let p = params.unwrap_or(Value::Null);
     let id = p.get("id").and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.id is required"))?
         .to_string();
-    let since_count = p.get("since_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let timeout_secs = p.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(30);
+    let since_count = p.get("since_count").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_SINCE_COUNT) as usize;
+    let timeout_secs = p.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_WAIT_TIMEOUT_SECS);
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
     loop {
@@ -121,6 +140,7 @@ pub async fn wait(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)] // Params are passed owned from the WS dispatcher
 pub fn get(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let id = params
         .as_ref()

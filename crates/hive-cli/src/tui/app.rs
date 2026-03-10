@@ -560,6 +560,7 @@ fn render_single_field_dialog(f: &mut Frame, area: Rect, title: &str, label: &st
 }
 
 /// Run the TUI event loop. Connects to the hive-server at `server_url` for live updates.
+#[allow(clippy::needless_pass_by_value)] // run() owns all its inputs for clarity at call sites
 pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -638,7 +639,7 @@ pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<(
                 render_single_field_dialog(f, area, "Add Comment", "Comment", &d.content);
             } else if let Some(ref d) = app.push_dialog {
                 let target = app.state.agents.get(d.target_agent_idx)
-                    .map(|a| a.name.as_str()).unwrap_or("?");
+                    .map_or("?", |a| a.name.as_str());
                 render_single_field_dialog(f, area, &format!("Push → {target}"), "Message", &d.content);
             }
         })?;

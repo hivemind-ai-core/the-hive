@@ -99,27 +99,41 @@ pub fn get_comments(pool: &DbPool, topic_id: &str) -> Result<Vec<Comment>> {
 
 fn row_to_topic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Topic> {
     use chrono::Utc;
+    let id: String = row.get(0)?;
     let created_at_str: String = row.get(4)?;
     let updated_at_str: String = row.get(5)?;
+    let created_at = created_at_str.parse().unwrap_or_else(|e| {
+        tracing::warn!(topic_id = %id, raw = %created_at_str, error = %e, "failed to parse topic created_at; using now");
+        Utc::now()
+    });
+    let last_updated_at = updated_at_str.parse().unwrap_or_else(|e| {
+        tracing::warn!(topic_id = %id, raw = %updated_at_str, error = %e, "failed to parse topic last_updated_at; using now");
+        Utc::now()
+    });
     Ok(Topic {
-        id: row.get(0)?,
+        id,
         title: row.get(1)?,
         content: row.get(2)?,
         creator_agent_id: row.get(3)?,
-        created_at: created_at_str.parse().unwrap_or_else(|_| Utc::now()),
-        last_updated_at: updated_at_str.parse().unwrap_or_else(|_| Utc::now()),
+        created_at,
+        last_updated_at,
     })
 }
 
 fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
     use chrono::Utc;
+    let id: String = row.get(0)?;
     let created_at_str: String = row.get(4)?;
+    let created_at = created_at_str.parse().unwrap_or_else(|e| {
+        tracing::warn!(comment_id = %id, raw = %created_at_str, error = %e, "failed to parse comment created_at; using now");
+        Utc::now()
+    });
     Ok(Comment {
-        id: row.get(0)?,
+        id,
         topic_id: row.get(1)?,
         content: row.get(2)?,
         creator_agent_id: row.get(3)?,
-        created_at: created_at_str.parse().unwrap_or_else(|_| Utc::now()),
+        created_at,
     })
 }
 
@@ -127,15 +141,7 @@ fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
 mod tests {
     use super::*;
     use crate::db::open_test_db;
-    use hive_core::types::{Comment, Topic};
-
-    fn make_topic(title: &str) -> Topic {
-        Topic::new(title.to_string(), "content".to_string(), Some("agent-1".to_string()))
-    }
-
-    fn make_comment(topic_id: &str, content: &str) -> Comment {
-        Comment::new(topic_id.to_string(), content.to_string(), Some("agent-1".to_string()))
-    }
+    use crate::test_helpers::{make_comment, make_topic};
 
     // ── insert / get topic ────────────────────────────────────────────────────
 

@@ -25,6 +25,7 @@ pub fn create(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     Ok(serde_json::to_value(&task)?)
 }
 
+#[allow(clippy::needless_pass_by_value)] // Params are passed owned from the WS dispatcher
 pub fn list(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let status = params.as_ref().and_then(|v| v.get("status")).and_then(|v| v.as_str()).map(str::to_owned);
     let tag = params.as_ref().and_then(|v| v.get("tag")).and_then(|v| v.as_str()).map(str::to_owned);
@@ -39,6 +40,7 @@ pub fn list(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     Ok(serde_json::to_value(&tasks)?)
 }
 
+#[allow(clippy::needless_pass_by_value)] // Params are passed owned from the WS dispatcher
 pub fn get(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let id = params
         .as_ref()
@@ -68,7 +70,9 @@ pub fn update(pool: &DbPool, params: Option<Value>) -> Result<Value> {
         task.tags = serde_json::from_value(tags.clone())?;
     }
     if let Some(status_str) = p.get("status").and_then(|v| v.as_str()) {
-        let new_status = parse_status(status_str)?;
+        let new_status: hive_core::types::TaskStatus =
+            serde_json::from_value(serde_json::json!(status_str))
+                .map_err(|_| anyhow::anyhow!("unknown status: {status_str}"))?;
         validate_transition(task.status, new_status)?;
         task.status = new_status;
         // Reset to pending also unassigns the task.
@@ -120,6 +124,7 @@ pub fn set_dependency(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     Ok(serde_json::json!({ "ok": true }))
 }
 
+#[allow(clippy::needless_pass_by_value)] // Params are passed owned from the WS dispatcher
 pub fn get_next(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<Value> {
     let tag = params.as_ref().and_then(|v| v.get("tag")).and_then(|v| v.as_str()).map(str::to_owned);
     match db_tasks::get_next(pool, agent_id, tag.as_deref())? {
@@ -143,18 +148,19 @@ pub fn complete(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<
     }))
 }
 
-fn parse_status(s: &str) -> Result<hive_core::types::TaskStatus> {
-    use hive_core::types::TaskStatus::*;
-    match s {
-        "pending"     => Ok(Pending),
-        "in-progress" => Ok(InProgress),
-        "done"        => Ok(Done),
-        "blocked"     => Ok(Blocked),
-        "cancelled"   => Ok(Cancelled),
-        other => anyhow::bail!("unknown status: {other}"),
-    }
-}
-
+/// Validate a [`TaskStatus`] transition, returning an error for illegal moves.
+///
+/// Allowed transitions:
+///
+/// | From        | To (allowed)                           |
+/// |-------------|----------------------------------------|
+/// | Pending     | `InProgress`, Cancelled, Blocked         |
+/// | `InProgress`  | Done, Blocked, Cancelled, Pending      |
+/// | Blocked     | Pending, Cancelled                     |
+/// | Done        | *(none — terminal)*                    |
+/// | Cancelled   | *(none — terminal)*                    |
+///
+/// A self-transition (`from == to`) is always allowed (idempotent update).
 fn validate_transition(
     from: hive_core::types::TaskStatus,
     to: hive_core::types::TaskStatus,
@@ -169,6 +175,6 @@ fn validate_transition(
     if allowed.contains(&to) || from == to {
         Ok(())
     } else {
-        anyhow::bail!("invalid status transition: {from:?} → {to:?}")
+        anyhow::bail!("invalid status transition: {from} → {to}")
     }
 }

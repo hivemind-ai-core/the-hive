@@ -15,6 +15,18 @@ pub enum TaskStatus {
     Cancelled,
 }
 
+impl std::fmt::Display for TaskStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskStatus::Pending => write!(f, "pending"),
+            TaskStatus::InProgress => write!(f, "in-progress"),
+            TaskStatus::Done => write!(f, "done"),
+            TaskStatus::Blocked => write!(f, "blocked"),
+            TaskStatus::Cancelled => write!(f, "cancelled"),
+        }
+    }
+}
+
 /// A task in the queue
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -31,6 +43,7 @@ pub struct Task {
 }
 
 impl Task {
+    #[must_use]
     pub fn new(title: String, description: Option<String>, tags: Vec<String>) -> Self {
         let now = Utc::now();
         Self {
@@ -60,6 +73,7 @@ pub struct Topic {
 }
 
 impl Topic {
+    #[must_use]
     pub fn new(title: String, content: String, creator_agent_id: Option<String>) -> Self {
         let now = Utc::now();
         Self {
@@ -84,6 +98,7 @@ pub struct Comment {
 }
 
 impl Comment {
+    #[must_use]
     pub fn new(topic_id: String, content: String, creator_agent_id: Option<String>) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -107,6 +122,7 @@ pub struct PushMessage {
 }
 
 impl PushMessage {
+    #[must_use]
     pub fn new(to_agent_id: String, content: String, from_agent_id: Option<String>) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -128,7 +144,7 @@ pub struct Agent {
     pub connected_at: Option<DateTime<Utc>>,
     pub last_seen_at: Option<DateTime<Utc>>,
     /// Maximum number of concurrent tasks this agent can handle.
-    /// Defaults to 1. Server assigns work when active_tasks < capacity_max.
+    /// Defaults to 1. Server assigns work when `active_tasks` < `capacity_max`.
     #[serde(default = "default_capacity_max")]
     pub capacity_max: u8,
 }
@@ -204,6 +220,15 @@ mod tests {
         assert_eq!(s, TaskStatus::InProgress);
         let s: TaskStatus = serde_json::from_str("\"pending\"").unwrap();
         assert_eq!(s, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn task_status_display() {
+        assert_eq!(TaskStatus::Pending.to_string(), "pending");
+        assert_eq!(TaskStatus::InProgress.to_string(), "in-progress");
+        assert_eq!(TaskStatus::Done.to_string(), "done");
+        assert_eq!(TaskStatus::Blocked.to_string(), "blocked");
+        assert_eq!(TaskStatus::Cancelled.to_string(), "cancelled");
     }
 
     #[test]
@@ -366,24 +391,41 @@ mod tests {
     }
 }
 
-/// API request/response wrapper
+/// JSON-RPC–like message envelope used for all WebSocket communication.
+///
+/// - **Request**: `type="request"`, `method` and `params` are set; `id` is a UUID
+///   the caller uses to match the response.
+/// - **Response**: `type="response"`, `id` echoes the request id; `result` holds the value.
+/// - **Error**: `type="error"`, `id` echoes the request id; `error` describes the failure.
+/// - **Push**: `type="push"`, server-initiated; `method` names the event (e.g. `task.assign`);
+///   `id` is a fresh UUID. No response is expected.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiMessage {
     #[serde(rename = "type")]
     pub msg_type: MessageType,
+    /// Correlation ID. Callers set this on requests; servers echo it on responses/errors.
     pub id: String,
+    /// Method name (e.g. `"task.create"`). Present on requests and push messages.
     pub method: Option<String>,
+    /// Request parameters. Present on requests only.
     pub params: Option<serde_json::Value>,
+    /// Success payload. Present on response messages only.
     pub result: Option<serde_json::Value>,
+    /// Error detail. Present on error messages only.
     pub error: Option<ApiError>,
 }
 
+/// Discriminator for the [`ApiMessage`] envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageType {
+    /// Client-initiated call expecting a response.
     Request,
+    /// Server reply to a request (success).
     Response,
+    /// Server reply to a request (failure).
     Error,
+    /// Server-initiated notification. No response expected.
     Push,
 }
 

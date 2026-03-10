@@ -1,4 +1,4 @@
-//! App daemon config screen: daemon_port, daemon_host_port.
+//! App daemon config screen: `daemon_port`, `daemon_host_port`.
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{

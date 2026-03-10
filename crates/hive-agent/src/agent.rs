@@ -50,16 +50,7 @@ impl Agent {
         let n = self.active_tasks.fetch_add(1, Ordering::SeqCst) + 1;
         status::report(&self.cmd_tx, n, &self.last_status);
 
-        Self::spawn_task(
-            task,
-            Arc::clone(&self.agent_id),
-            Arc::clone(&self.coding_agent),
-            self.cmd_tx.clone(),
-            self.pending.clone(),
-            Arc::clone(&self.active_tasks),
-            self.last_status.clone(),
-            Arc::clone(&self.push_cache),
-        );
+        Self::spawn_task(self.clone(), task);
     }
 
     /// Called when `push.notify` arrives and agent is idle. Spawns a push-only execution.
@@ -72,28 +63,21 @@ impl Agent {
         let n = self.active_tasks.fetch_add(1, Ordering::SeqCst) + 1;
         status::report(&self.cmd_tx, n, &self.last_status);
 
-        Self::spawn_push_only(
-            messages,
-            Arc::clone(&self.agent_id),
-            Arc::clone(&self.coding_agent),
-            self.cmd_tx.clone(),
-            Arc::clone(&self.active_tasks),
-            self.last_status.clone(),
-        );
+        Self::spawn_push_only(self.clone(), messages);
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn spawn_task(
-        task: Task,
-        agent_id: Arc<String>,
-        coding_agent: Arc<String>,
-        cmd_tx: UnboundedSender<ClientCmd>,
-        pending: PendingRequests,
-        active_tasks: Arc<AtomicU8>,
-        last_status: LastStatus,
-        push_cache: Arc<Mutex<Vec<PushMessage>>>,
-    ) {
+    fn spawn_task(agent: Agent, task: Task) {
         tokio::spawn(async move {
+            let Agent {
+                agent_id,
+                coding_agent,
+                cmd_tx,
+                pending,
+                active_tasks,
+                last_status,
+                push_cache,
+            } = agent;
+
             info!("Running task: {} ({})", task.title, task.id);
 
             // active_tasks already incremented synchronously in on_task_assign.
@@ -195,14 +179,8 @@ impl Agent {
         });
     }
 
-    fn spawn_push_only(
-        messages: Vec<PushMessage>,
-        agent_id: Arc<String>,
-        coding_agent: Arc<String>,
-        cmd_tx: UnboundedSender<ClientCmd>,
-        active_tasks: Arc<AtomicU8>,
-        last_status: LastStatus,
-    ) {
+    fn spawn_push_only(agent: Agent, messages: Vec<PushMessage>) {
+        let Agent { agent_id, coding_agent, cmd_tx, active_tasks, last_status, .. } = agent;
         let message_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
         tokio::spawn(async move {
             // active_tasks already incremented synchronously in on_push_notify.

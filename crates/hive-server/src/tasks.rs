@@ -7,10 +7,16 @@ use rusqlite::params;
 
 use crate::db::DbPool;
 
+const STATUS_PENDING: &str = "pending";
+const STATUS_IN_PROGRESS: &str = "in-progress";
+const STATUS_DONE: &str = "done";
+const STATUS_BLOCKED: &str = "blocked";
+const STATUS_CANCELLED: &str = "cancelled";
+
 pub fn insert_task(pool: &DbPool, task: &Task) -> Result<()> {
     let conn = pool.get()?;
     let tags = serde_json::to_string(&task.tags).context("serializing tags")?;
-    let status = status_to_str(task.status);
+    let status = task.status.to_string();
     conn.execute(
         "INSERT INTO tasks (id, title, description, status, assigned_agent_id, tags, result, position, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -48,7 +54,7 @@ pub fn get_task(pool: &DbPool, id: &str) -> Result<Option<Task>> {
 pub fn update_task(pool: &DbPool, task: &Task) -> Result<()> {
     let conn = pool.get()?;
     let tags = serde_json::to_string(&task.tags).context("serializing tags")?;
-    let status = status_to_str(task.status);
+    let status = task.status.to_string();
     let now = Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE tasks SET title=?2, description=?3, status=?4, assigned_agent_id=?5,
@@ -78,24 +84,24 @@ fn list_pending_for_dispatch(pool: &DbPool, tag: Option<&str>) -> Result<Vec<Tas
     let sql = if tag.is_some() {
         "SELECT id, title, description, status, assigned_agent_id, tags, result, position, created_at, updated_at
          FROM tasks
-         WHERE status = 'pending'
+         WHERE status = ?1
            AND (tags = '[]' OR tags IS NULL OR tags = ''
-                OR EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?))
+                OR EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?2))
          ORDER BY position ASC, created_at ASC"
     } else {
         "SELECT id, title, description, status, assigned_agent_id, tags, result, position, created_at, updated_at
          FROM tasks
-         WHERE status = 'pending'
+         WHERE status = ?1
          ORDER BY position ASC, created_at ASC"
     };
 
     let mut stmt = conn.prepare(sql)?;
     let rows: Vec<Task> = if let Some(t) = tag {
-        stmt.query_map(rusqlite::params![t], row_to_task)?
+        stmt.query_map(rusqlite::params![STATUS_PENDING, t], row_to_task)?
             .filter_map(|r| r.ok())
             .collect()
     } else {
-        stmt.query_map([], row_to_task)?
+        stmt.query_map(rusqlite::params![STATUS_PENDING], row_to_task)?
             .filter_map(|r| r.ok())
             .collect()
     };
@@ -120,8 +126,8 @@ pub fn get_next(pool: &DbPool, agent_id: &str, tag: Option<&str>) -> Result<Opti
         let unfinished: i64 = conn.query_row(
             "SELECT COUNT(*) FROM task_dependencies td
              JOIN tasks t ON t.id = td.depends_on_id
-             WHERE td.task_id = ?1 AND t.status != 'done'",
-            rusqlite::params![task.id],
+             WHERE td.task_id = ?1 AND t.status != ?2",
+            rusqlite::params![task.id, STATUS_DONE],
             |row| row.get(0),
         )?;
 
@@ -130,9 +136,9 @@ pub fn get_next(pool: &DbPool, agent_id: &str, tag: Option<&str>) -> Result<Opti
             task.status = TaskStatus::InProgress;
             task.assigned_agent_id = Some(agent_id.to_string());
             conn.execute(
-                "UPDATE tasks SET status='in-progress', assigned_agent_id=?2, updated_at=datetime('now')
+                "UPDATE tasks SET status=?3, assigned_agent_id=?2, updated_at=datetime('now')
                  WHERE id=?1",
-                rusqlite::params![task.id, agent_id],
+                rusqlite::params![task.id, agent_id, STATUS_IN_PROGRESS],
             )?;
             return Ok(Some(task));
         }
@@ -145,20 +151,21 @@ pub fn get_next(pool: &DbPool, agent_id: &str, tag: Option<&str>) -> Result<Opti
 pub fn reset_in_progress_for_agent(pool: &DbPool, agent_id: &str) -> Result<usize> {
     let conn = pool.get()?;
     let count = conn.execute(
-        "UPDATE tasks SET status='pending', assigned_agent_id=NULL, updated_at=datetime('now')
-         WHERE status='in-progress' AND assigned_agent_id=?1",
-        rusqlite::params![agent_id],
+        "UPDATE tasks SET status=?2, assigned_agent_id=NULL, updated_at=datetime('now')
+         WHERE status=?3 AND assigned_agent_id=?1",
+        rusqlite::params![agent_id, STATUS_PENDING, STATUS_IN_PROGRESS],
     ).context("resetting orphaned tasks")?;
     Ok(count)
 }
 
 /// Mark a task done and optionally store a result string.
+#[allow(clippy::needless_pass_by_value)] // result is consumed by rusqlite params
 pub fn complete(pool: &DbPool, task_id: &str, result: Option<String>) -> Result<Task> {
     {
         let conn = pool.get()?;
         conn.execute(
-            "UPDATE tasks SET status='done', result=?2, updated_at=datetime('now') WHERE id=?1",
-            rusqlite::params![task_id, result],
+            "UPDATE tasks SET status=?3, result=?2, updated_at=datetime('now') WHERE id=?1",
+            rusqlite::params![task_id, result, STATUS_DONE],
         )
         .context("completing task")?;
     } // release lock before calling get_task
@@ -231,34 +238,36 @@ pub fn list_tasks(
 
 // -- helpers --
 
-fn status_to_str(s: TaskStatus) -> &'static str {
-    match s {
-        TaskStatus::Pending => "pending",
-        TaskStatus::InProgress => "in-progress",
-        TaskStatus::Done => "done",
-        TaskStatus::Blocked => "blocked",
-        TaskStatus::Cancelled => "cancelled",
-    }
-}
-
 fn str_to_status(s: &str) -> TaskStatus {
     match s {
-        "in-progress" => TaskStatus::InProgress,
-        "done" => TaskStatus::Done,
-        "blocked" => TaskStatus::Blocked,
-        "cancelled" => TaskStatus::Cancelled,
+        STATUS_IN_PROGRESS => TaskStatus::InProgress,
+        STATUS_DONE => TaskStatus::Done,
+        STATUS_BLOCKED => TaskStatus::Blocked,
+        STATUS_CANCELLED => TaskStatus::Cancelled,
         _ => TaskStatus::Pending,
     }
 }
 
 fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+    let id: String = row.get(0)?;
     let tags_json: String = row.get(5)?;
-    let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+    let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_else(|e| {
+        tracing::warn!(task_id = %id, raw = %tags_json, error = %e, "failed to parse task tags; using empty vec");
+        vec![]
+    });
     let status_str: String = row.get(3)?;
     let created_at_str: String = row.get(8)?;
     let updated_at_str: String = row.get(9)?;
+    let created_at = created_at_str.parse().unwrap_or_else(|e| {
+        tracing::warn!(task_id = %id, raw = %created_at_str, error = %e, "failed to parse task created_at; using now");
+        Utc::now()
+    });
+    let updated_at = updated_at_str.parse().unwrap_or_else(|e| {
+        tracing::warn!(task_id = %id, raw = %updated_at_str, error = %e, "failed to parse task updated_at; using now");
+        Utc::now()
+    });
     Ok(Task {
-        id: row.get(0)?,
+        id,
         title: row.get(1)?,
         description: row.get(2)?,
         status: str_to_status(&status_str),
@@ -266,8 +275,8 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         tags,
         result: row.get(6)?,
         position: row.get(7)?,
-        created_at: created_at_str.parse().unwrap_or_else(|_| Utc::now()),
-        updated_at: updated_at_str.parse().unwrap_or_else(|_| Utc::now()),
+        created_at,
+        updated_at,
     })
 }
 
@@ -292,8 +301,8 @@ pub fn split(pool: &DbPool, parent_id: &str, subtasks: Vec<Task>) -> Result<Vec<
     // Cancel the original.
     let conn = pool.get()?;
     conn.execute(
-        "UPDATE tasks SET status='cancelled', updated_at=datetime('now') WHERE id=?1",
-        rusqlite::params![parent_id],
+        "UPDATE tasks SET status=?2, updated_at=datetime('now') WHERE id=?1",
+        rusqlite::params![parent_id, STATUS_CANCELLED],
     )?;
 
     Ok(created)
@@ -323,9 +332,10 @@ fn topological_reorder(pool: &DbPool) -> Result<()> {
 
     let conn = pool.get()?;
 
-    let mut stmt = conn.prepare(
-        "SELECT id FROM tasks WHERE status NOT IN ('done','cancelled')",
-    )?;
+    let active_sql = format!(
+        "SELECT id FROM tasks WHERE status NOT IN ('{STATUS_DONE}','{STATUS_CANCELLED}')"
+    );
+    let mut stmt = conn.prepare(&active_sql)?;
     let ids: Vec<String> = stmt
         .query_map([], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?;
@@ -336,10 +346,11 @@ fn topological_reorder(pool: &DbPool) -> Result<()> {
     let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
 
     {
-        let mut stmt = conn.prepare(
+        let deps_sql = format!(
             "SELECT task_id, depends_on_id FROM task_dependencies
-             WHERE task_id IN (SELECT id FROM tasks WHERE status NOT IN ('done','cancelled'))",
-        )?;
+             WHERE task_id IN (SELECT id FROM tasks WHERE status NOT IN ('{STATUS_DONE}','{STATUS_CANCELLED}'))"
+        );
+        let mut stmt = conn.prepare(&deps_sql)?;
         let edges: Vec<(String, String)> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
@@ -390,19 +401,7 @@ fn topological_reorder(pool: &DbPool) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db::open_test_db;
-    use hive_core::types::Task;
-
-    fn make_task(title: &str) -> Task {
-        Task::new(title.to_string(), None, vec![])
-    }
-
-    fn make_tagged_task(title: &str, tags: &[&str]) -> Task {
-        Task::new(
-            title.to_string(),
-            None,
-            tags.iter().map(|s| s.to_string()).collect(),
-        )
-    }
+    use crate::test_helpers::{make_tagged_task, make_task};
 
     // ── insert / get ─────────────────────────────────────────────────────────
 

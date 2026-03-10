@@ -2,7 +2,7 @@
 //!
 //! `report` sends `agent.status { active_tasks }` and timestamps the send.
 //! `spawn_watchdog` sends `agent.heartbeat` when the agent has been silent
-//! for WATCHDOG_INTERVAL, keeping the server's `last_seen_at` fresh.
+//! for `WATCHDOG_INTERVAL`, keeping the server's `last_seen_at` fresh.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -39,7 +39,7 @@ pub fn report(cmd_tx: &UnboundedSender<ClientCmd>, active_tasks: u8, last_status
 }
 
 /// Spawn the watchdog loop. Sends `agent.heartbeat` whenever no status has
-/// been reported for WATCHDOG_INTERVAL, keeping `last_seen_at` current.
+/// been reported for `WATCHDOG_INTERVAL`, keeping `last_seen_at` current.
 pub fn spawn_watchdog(cmd_tx: UnboundedSender<ClientCmd>, last_status: LastStatus) {
     tokio::spawn(async move {
         loop {

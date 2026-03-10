@@ -11,7 +11,7 @@ use axum::extract::ws::Message;
 use chrono::{DateTime, Utc};
 use hive_core::types::{ApiMessage, MessageType, Task};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::db::DbPool;
@@ -19,19 +19,52 @@ use crate::tasks as db_tasks;
 
 /// Per-agent in-memory state for a connected agent.
 pub struct AgentState {
-    pub id: String,
-    pub tags: Vec<String>,
+    pub(crate) id: String,
+    pub(crate) tags: Vec<String>,
     /// Maximum concurrent tasks this agent can run (sent in agent.register).
-    pub capacity_max: u8,
+    pub(crate) capacity_max: u8,
     /// Current number of active tasks (updated by agent.status messages).
-    pub active_tasks: u8,
-    pub last_seen_at: DateTime<Utc>,
+    pub(crate) active_tasks: u8,
+    pub(crate) last_seen_at: DateTime<Utc>,
     /// Channel to send WebSocket messages to this agent.
-    pub ws_tx: UnboundedSender<Message>,
+    pub(crate) ws_tx: UnboundedSender<Message>,
     /// True after agent.register has been processed. Only registered agents
     /// are eligible for proactive dispatch. This maintains backward compatibility
-    /// with old-style agents that use task.get_next directly.
-    pub registered: bool,
+    /// with old-style agents that use `task.get_next` directly.
+    pub(crate) registered: bool,
+}
+
+impl AgentState {
+    /// Create a new `AgentState` with default values.
+    /// `registered` is false — set to true after `agent.register` is processed.
+    pub fn new(id: String, ws_tx: UnboundedSender<Message>) -> Self {
+        Self {
+            id,
+            tags: vec![],
+            capacity_max: 1,
+            active_tasks: 0,
+            last_seen_at: Utc::now(),
+            ws_tx,
+            registered: false,
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn tags(&self) -> &[String] {
+        &self.tags
+    }
+
+    pub fn registered(&self) -> bool {
+        self.registered
+    }
+
+    /// Returns true when the agent can accept another task.
+    pub fn has_capacity(&self) -> bool {
+        self.active_tasks < self.capacity_max
+    }
 }
 
 /// Thread-safe registry of all connected agents.
@@ -46,7 +79,7 @@ pub fn new_registry() -> AgentRegistry {
 /// Acquires the registry lock for the duration of the operation (including the
 /// DB claim) to prevent double-assignment. Returns true if a task was dispatched.
 ///
-/// Call from: agent.register, agent.status (when active_tasks drops), task creation.
+/// Call from: agent.register, agent.status (when `active_tasks` drops), task creation.
 pub fn try_dispatch(registry: &AgentRegistry, db: &DbPool) -> bool {
     let mut agents = match registry.lock() {
         Ok(g) => g,
@@ -60,8 +93,8 @@ pub fn try_dispatch(registry: &AgentRegistry, db: &DbPool) -> bool {
     // Only agents that sent agent.register are eligible for proactive dispatch.
     let agent_info = agents
         .values()
-        .filter(|a| a.registered && a.active_tasks < a.capacity_max)
-        .map(|a| (a.id.clone(), a.tags.first().cloned()))
+        .filter(|a| a.registered() && a.has_capacity())
+        .map(|a| (a.id().to_string(), a.tags().first().cloned()))
         .next();
 
     let Some((agent_id, first_tag)) = agent_info else {
@@ -85,7 +118,9 @@ pub fn try_dispatch(registry: &AgentRegistry, db: &DbPool) -> bool {
         state.active_tasks += 1;
         let msg = make_task_assign(&task);
         if let Ok(json) = serde_json::to_string(&msg) {
-            let _ = state.ws_tx.send(Message::Text(json.into()));
+            if let Err(e) = state.ws_tx.send(Message::Text(json.into())) {
+                debug!(agent_id = %agent_id, method = "task.assign", error = %e, "ws_tx send failed; agent likely disconnected");
+            }
         }
     }
 
@@ -97,7 +132,11 @@ pub fn try_dispatch(registry: &AgentRegistry, db: &DbPool) -> bool {
 }
 
 /// Send a `push.notify` message to a specific agent (if connected).
-pub fn notify_agent(registry: &AgentRegistry, agent_id: &str, messages: serde_json::Value) {
+///
+/// Called when new push messages arrive for `agent_id` — for example when the agent
+/// is `@mentioned` in a topic comment. Silently does nothing if the agent is not
+/// currently connected (messages are persisted in the DB for offline delivery).
+pub fn notify_agent(registry: &AgentRegistry, agent_id: &str, messages: &serde_json::Value) {
     if let Ok(agents) = registry.lock() {
         if let Some(state) = agents.get(agent_id) {
             let msg = ApiMessage {
@@ -109,29 +148,43 @@ pub fn notify_agent(registry: &AgentRegistry, agent_id: &str, messages: serde_js
                 error: None,
             };
             if let Ok(json) = serde_json::to_string(&msg) {
-                let _ = state.ws_tx.send(Message::Text(json.into()));
+                if let Err(e) = state.ws_tx.send(Message::Text(json.into())) {
+                    debug!(agent_id = %agent_id, method = "push.notify", error = %e, "ws_tx send failed; agent likely disconnected");
+                }
             }
         }
     }
 }
 
-/// Broadcast a message to all connected agents.
+/// Broadcast a message to all currently connected agents.
+///
+/// Used for state-change notifications (`agents.updated`, `tasks.updated`,
+/// `topics.updated`) so every agent can refresh its local view.
+/// Per-agent send failures are logged at debug level and do not abort the broadcast.
 pub fn broadcast_all(registry: &AgentRegistry, msg: &ApiMessage) {
     if let Ok(json) = serde_json::to_string(msg) {
         if let Ok(agents) = registry.lock() {
             for state in agents.values() {
-                let _ = state.ws_tx.send(Message::Text(json.clone().into()));
+                if let Err(e) = state.ws_tx.send(Message::Text(json.clone().into())) {
+                    debug!(agent_id = %state.id, method = ?msg.method, error = %e, "ws_tx send failed; agent likely disconnected");
+                }
             }
         }
     }
 }
 
 /// Send a message to one specific agent.
+///
+/// Unlike [`notify_agent`], this delivers any [`ApiMessage`] (not just push notifications).
+/// Used by handlers to respond to requests that need out-of-band delivery, or to
+/// push targeted notifications. Silently does nothing if the agent is not connected.
 pub fn send_to_agent(registry: &AgentRegistry, agent_id: &str, msg: &ApiMessage) {
     if let Ok(agents) = registry.lock() {
         if let Some(state) = agents.get(agent_id) {
             if let Ok(json) = serde_json::to_string(msg) {
-                let _ = state.ws_tx.send(Message::Text(json.into()));
+                if let Err(e) = state.ws_tx.send(Message::Text(json.into())) {
+                    debug!(agent_id = %agent_id, method = ?msg.method, error = %e, "ws_tx send failed; agent likely disconnected");
+                }
             }
         }
     }

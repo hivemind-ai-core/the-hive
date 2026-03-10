@@ -280,9 +280,7 @@ pub async fn status(project_dir: &Path) -> Result<()> {
                 let status = info
                     .state
                     .as_ref()
-                    .and_then(|s| s.status.as_ref())
-                    .map(|s| format!("{s:?}"))
-                    .unwrap_or_else(|| "unknown".to_string());
+                    .and_then(|s| s.status.as_ref()).map_or_else(|| "unknown".to_string(), |s| format!("{s:?}"));
                 let cid = info.id.as_deref().unwrap_or("-");
                 println!("{:<35} {:<15} {}", name, status, &cid[..8.min(cid.len())]);
             }
@@ -426,7 +424,7 @@ fn warn_missing_credentials(cfg: &Config, project_dir: &Path) {
     let has_key = |key: &str| {
         dotenv_content.lines().any(|l| {
             l.trim_start().starts_with(key) && l.contains('=') && {
-                let v = l.split_once('=').map(|(_, r)| r).unwrap_or("").trim();
+                let v = l.split_once('=').map_or("", |(_, r)| r).trim();
                 !v.is_empty()
             }
         })
@@ -742,9 +740,7 @@ pub async fn logs(project_dir: &Path, container: &str, follow: bool) -> Result<(
         // Resolve short alias to full name, or use as-is for explicit container names.
         let full = all_targets
             .iter()
-            .find(|(alias, _)| alias == container)
-            .map(|(_, full)| full.clone())
-            .unwrap_or_else(|| container.to_string());
+            .find(|(alias, _)| alias == container).map_or_else(|| container.to_string(), |(_, full)| full.clone());
         vec![(container.to_string(), full)]
     };
 

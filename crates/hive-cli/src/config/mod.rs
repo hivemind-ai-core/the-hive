@@ -43,7 +43,7 @@ pub struct Agent {
     /// Tags assigned to this agent.
     #[serde(default)]
     pub tags: Vec<String>,
-    /// How the agent's credentials are configured: "none" | "synced" | "api_key".
+    /// How the agent's credentials are configured: "none" | "synced" | "`api_key`".
     #[serde(default)]
     pub auth: String,
     /// Extra environment variables passed to this agent's container.
@@ -68,7 +68,7 @@ pub struct ServerConfig {
     pub port: u16,
     /// Host-side port exposed for hive-server.
     pub host_port: u16,
-    /// Path to SQLite database file inside the container.
+    /// Path to `SQLite` database file inside the container.
     pub db_path: String,
 }
 
@@ -200,7 +200,7 @@ impl Default for GlobalDefaults {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct GlobalDockerConfig {
-    /// Docker socket URI (e.g. "unix:///var/run/docker.sock").
-    /// Overrides DOCKER_HOST if set.
+    /// Docker socket URI (e.g. "<unix:///var/run/docker.sock>").
+    /// Overrides `DOCKER_HOST` if set.
     pub socket: Option<String>,
 }

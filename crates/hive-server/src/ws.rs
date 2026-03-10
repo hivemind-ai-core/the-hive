@@ -7,7 +7,6 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use hive_core::types::{ApiError, ApiMessage, MessageType};
 use std::collections::HashMap;
@@ -66,15 +65,7 @@ async fn handle_connection(socket: WebSocket, agent_id: String, state: AppState)
     // registered=false: try_dispatch won't dispatch to this agent until agent.register
     // is processed, preserving backward compat with agents that use task.get_next.
     {
-        let entry = AgentState {
-            id: agent_id.clone(),
-            tags: vec![],
-            capacity_max: 1,
-            active_tasks: 0,
-            last_seen_at: Utc::now(),
-            ws_tx: tx,
-            registered: false,
-        };
+        let entry = AgentState::new(agent_id.clone(), tx);
         if let Ok(mut agents) = state.agents.lock() {
             agents.insert(agent_id.clone(), entry);
         }
@@ -180,7 +171,7 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
             "task.create" | "task.update" | "task.complete" | "task.split"
             | "task.set_dependency" => broadcast_tasks(state),
             "task.get_next" => {
-                if response.result.as_ref().map(|v| !v.is_null()).unwrap_or(false) {
+                if response.result.as_ref().is_some_and(|v| !v.is_null()) {
                     broadcast_tasks(state);
                 }
             }

@@ -32,6 +32,20 @@ pub enum Error {
     AgentNotFound(String),
 }
 
+/// `From<String>` / `From<&str>` produce [`Error::Agent`] as a generic
+/// catch-all so callers can use `?` on any `Result<_, String>`.
+impl From<String> for Error {
+    fn from(s: String) -> Self {
+        Self::Agent(s)
+    }
+}
+
+impl From<&str> for Error {
+    fn from(s: &str) -> Self {
+        Self::Agent(s.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +96,19 @@ mod tests {
         let err = Error::Io(io_err);
         assert!(err.to_string().starts_with("IO error:"));
         assert!(err.to_string().contains("file missing"));
+    }
+
+    #[test]
+    fn error_from_string() {
+        let err: Error = "something went wrong".to_string().into();
+        assert!(matches!(err, Error::Agent(_)));
+        assert!(err.to_string().contains("something went wrong"));
+    }
+
+    #[test]
+    fn error_from_str() {
+        let err: Error = "bad input".into();
+        assert!(matches!(err, Error::Agent(_)));
+        assert!(err.to_string().contains("bad input"));
     }
 }

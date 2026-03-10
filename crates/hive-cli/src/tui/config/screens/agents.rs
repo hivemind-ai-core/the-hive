@@ -12,7 +12,7 @@
 //! Edit mode (for a specific agent):
 //!   j/k       — move between fields
 //!   Enter     — start/commit editing the focused field
-//!   ←/→/Space — cycle select fields (coding_agent, auth, kilo provider)
+//!   ←/→/Space — cycle select fields (`coding_agent`, auth, kilo provider)
 //!   Esc       — leave edit mode, return to list
 
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -104,10 +104,7 @@ fn render_list(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
 }
 
 fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize) {
-    let agent = match state.config.agents.get(idx) {
-        Some(a) => a,
-        None => return,
-    };
+    let Some(agent) = state.config.agents.get(idx) else { return };
     let title = format!(" Edit agent '{}' — Esc to return ", agent.name);
     let block = Block::default().title(title).borders(Borders::ALL);
     let inner = block.inner(area);
@@ -199,7 +196,7 @@ fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize)
     // Field 5: Endpoint URL (api_key only)
     if field_count >= 6 {
         let focused5 = state.agent_subfield == 5;
-        let endpoint_current = agent.env.get("ANTHROPIC_BASE_URL").map(String::as_str).unwrap_or("").to_string();
+        let endpoint_current = agent.env.get("ANTHROPIC_BASE_URL").map_or("", String::as_str).to_string();
         f.render_widget(
             Paragraph::new(render_field(
                 focused5,
@@ -270,8 +267,7 @@ fn handle_edit(code: KeyCode, state: &mut ConfigWizardState) -> WizardCmd {
 
     let field_count = state.agent_edit
         .and_then(|i| state.config.agents.get(i))
-        .map(agent_field_count)
-        .unwrap_or(4);
+        .map_or(4, agent_field_count);
 
     match code {
         KeyCode::Char('j') | KeyCode::Down => {
@@ -362,14 +358,8 @@ fn add_agent(state: &mut ConfigWizardState) {
 }
 
 fn current_agent_field_value(state: &ConfigWizardState) -> String {
-    let idx = match state.agent_edit {
-        Some(i) => i,
-        None => return String::new(),
-    };
-    let agent = match state.config.agents.get(idx) {
-        Some(a) => a,
-        None => return String::new(),
-    };
+    let Some(idx) = state.agent_edit else { return String::new() };
+    let Some(agent) = state.config.agents.get(idx) else { return String::new() };
     match state.agent_subfield {
         0 => agent.name.clone(),
         2 => agent.tags.join(", "),
@@ -381,10 +371,7 @@ fn current_agent_field_value(state: &ConfigWizardState) -> String {
 
 fn commit_agent_field(state: &mut ConfigWizardState) {
     let input = state.input.trim().to_string();
-    let idx = match state.agent_edit {
-        Some(i) => i,
-        None => { state.stop_editing(); return; }
-    };
+    let Some(idx) = state.agent_edit else { state.stop_editing(); return; };
     if let Some(agent) = state.config.agents.get_mut(idx) {
         match state.agent_subfield {
             0 => agent.name = input,
@@ -418,23 +405,23 @@ fn commit_agent_field(state: &mut ConfigWizardState) {
 fn agent_has_auth(agent: &Agent) -> bool {
     match agent.auth.as_str() {
         "synced" => true,
-        "api_key" => agent.env.get("ANTHROPIC_API_KEY").map(|v| !v.is_empty()).unwrap_or(false),
+        "api_key" => agent.env.get("ANTHROPIC_API_KEY").is_some_and(|v| !v.is_empty()),
         _ => false,
     }
 }
 
 /// Return a display string indicating whether the API key is set in agent.env.
 fn agent_env_key_status(agent: &Agent, key: &str) -> String {
-    if agent.env.get(key).map(|v| !v.is_empty()).unwrap_or(false) {
+    if agent.env.get(key).is_some_and(|v| !v.is_empty()) {
         "(set — Enter to update)".to_string()
     } else {
         "(not set — Enter to set)".to_string()
     }
 }
 
-/// Cycle the coding_agent value through CODING_AGENTS for the currently edited agent.
+/// Cycle the `coding_agent` value through `CODING_AGENTS` for the currently edited agent.
 fn cycle_coding_agent(state: &mut ConfigWizardState) {
-    let idx = match state.agent_edit { Some(i) => i, None => return };
+    let Some(idx) = state.agent_edit else { return };
     if let Some(agent) = state.config.agents.get_mut(idx) {
         let pos = CODING_AGENTS.iter().position(|&s| s == agent.coding_agent).unwrap_or(0);
         let next = (pos + 1) % CODING_AGENTS.len();
@@ -442,10 +429,10 @@ fn cycle_coding_agent(state: &mut ConfigWizardState) {
     }
 }
 
-/// Cycle the auth mode through AUTH_MODES for the currently edited agent.
+/// Cycle the auth mode through `AUTH_MODES` for the currently edited agent.
 /// When transitioning to "synced" on a kilo agent, eagerly load providers.
 fn cycle_auth_mode(state: &mut ConfigWizardState) {
-    let idx = match state.agent_edit { Some(i) => i, None => return };
+    let Some(idx) = state.agent_edit else { return };
     let (new_auth, is_kilo) = if let Some(agent) = state.config.agents.get_mut(idx) {
         let pos = AUTH_MODES.iter().position(|&s| s == agent.auth).unwrap_or(0);
         let next = (pos + 1) % AUTH_MODES.len();
@@ -466,8 +453,7 @@ fn cycle_auth_mode(state: &mut ConfigWizardState) {
     // Clamp subfield to new field count.
     let field_count = state.agent_edit
         .and_then(|i| state.config.agents.get(i))
-        .map(agent_field_count)
-        .unwrap_or(4);
+        .map_or(4, agent_field_count);
     if state.agent_subfield >= field_count {
         state.agent_subfield = field_count - 1;
     }
@@ -512,7 +498,7 @@ fn kilo_provider_display(state: &ConfigWizardState, agent: &Agent) -> String {
 /// Store the selected kilo provider config JSON in `agent.env["KILO_PROVIDER_JSON"]`.
 /// hive-agent will write this to ~/.kilocode/cli/config.json on startup.
 fn write_kilo_provider_config(state: &mut ConfigWizardState) {
-    let idx = match state.agent_edit { Some(i) => i, None => return };
+    let Some(idx) = state.agent_edit else { return };
     let provider_id = match state.kilo_providers.get(state.kilo_provider_sel) {
         Some(id) => id.clone(),
         None => return,
@@ -547,7 +533,7 @@ fn write_kilo_provider_config(state: &mut ConfigWizardState) {
 
 /// Read `~/.claude.json` and store its contents in `agent.env["CLAUDE_AUTH_JSON"]`.
 fn sync_claude_auth(state: &mut ConfigWizardState) {
-    let idx = match state.agent_edit { Some(i) => i, None => return };
+    let Some(idx) = state.agent_edit else { return };
     let path = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/root"))
         .join(".claude.json");
@@ -559,7 +545,7 @@ fn sync_claude_auth(state: &mut ConfigWizardState) {
 
 /// Return a status string for the claude auth field.
 fn claude_auth_status(agent: &Agent) -> &'static str {
-    if agent.env.get("CLAUDE_AUTH_JSON").map(|v| !v.is_empty()).unwrap_or(false) {
+    if agent.env.get("CLAUDE_AUTH_JSON").is_some_and(|v| !v.is_empty()) {
         "(synced from ~/.claude.json — Enter to re-sync)"
     } else {
         "(~/.claude.json not found — Enter to sync)"

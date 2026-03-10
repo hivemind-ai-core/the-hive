@@ -53,7 +53,7 @@ struct TaskCreateParams {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct TaskListParams {
-    /// Filter by status: "pending", "in_progress", "done", or "cancelled"
+    /// Filter by status: "pending", "`in_progress`", "done", or "cancelled"
     status: Option<String>,
     /// Filter by tag (exact match)
     tag: Option<String>,
@@ -69,7 +69,7 @@ struct TaskUpdateParams {
     id: String,
     description: Option<String>,
     tags: Option<Vec<String>>,
-    /// New status: "pending", "in_progress", "done", or "cancelled"
+    /// New status: "pending", "`in_progress`", "done", or "cancelled"
     status: Option<String>,
 }
 

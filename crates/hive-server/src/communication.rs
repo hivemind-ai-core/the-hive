@@ -100,25 +100,34 @@ pub fn touch_agent(pool: &DbPool, id: &str) -> Result<()> {
 // -- helpers --
 
 fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<PushMessage> {
+    let id: String = row.get(0)?;
     let created_at_str: String = row.get(5)?;
     let delivered: i32 = row.get(4)?;
+    let created_at = created_at_str.parse().unwrap_or_else(|e| {
+        tracing::warn!(message_id = %id, raw = %created_at_str, error = %e, "failed to parse message created_at; using now");
+        Utc::now()
+    });
     Ok(PushMessage {
-        id: row.get(0)?,
+        id,
         from_agent_id: row.get(1)?,
         to_agent_id: row.get(2)?,
         content: row.get(3)?,
         delivered: delivered != 0,
-        created_at: created_at_str.parse().unwrap_or_else(|_| Utc::now()),
+        created_at,
     })
 }
 
 fn row_to_agent(row: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
+    let agent_id: String = row.get(0)?;
     let tags_json: String = row.get(2)?;
-    let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+    let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_else(|e| {
+        tracing::warn!(agent_id = %agent_id, raw = %tags_json, error = %e, "failed to parse agent tags; using empty vec");
+        vec![]
+    });
     let connected_at: Option<String> = row.get(3)?;
     let last_seen_at: Option<String> = row.get(4)?;
     Ok(Agent {
-        id: row.get(0)?,
+        id: agent_id,
         name: row.get(1)?,
         tags,
         connected_at: connected_at.and_then(|s| s.parse().ok()),
@@ -131,22 +140,7 @@ fn row_to_agent(row: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
 mod tests {
     use super::*;
     use crate::db::open_test_db;
-    use hive_core::types::{Agent, PushMessage};
-
-    fn make_agent(id: &str) -> Agent {
-        Agent {
-            id: id.to_string(),
-            name: format!("Agent {id}"),
-            tags: vec![],
-            connected_at: Some(Utc::now()),
-            last_seen_at: Some(Utc::now()),
-            capacity_max: 1,
-        }
-    }
-
-    fn make_msg(to: &str, from: &str, content: &str) -> PushMessage {
-        PushMessage::new(to.to_string(), content.to_string(), Some(from.to_string()))
-    }
+    use crate::test_helpers::{make_agent, make_msg};
 
     // ── push messages ─────────────────────────────────────────────────────────
 

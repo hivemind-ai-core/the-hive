@@ -13,6 +13,8 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+/// How long to wait for a response to a request before giving up.
+/// 30 seconds is sufficient for all current server operations.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Commands sent from the agent logic to the client task.
@@ -148,7 +150,7 @@ async fn run_loop(
     }
 }
 
-/// Route an inbound message: responses go to waiting callers, pushes to push_tx.
+/// Route an inbound message: responses go to waiting callers, pushes to `push_tx`.
 fn route_message(
     msg: ApiMessage,
     pending: &PendingRequests,
@@ -168,7 +170,7 @@ fn route_message(
     let _ = push_tx.send(msg);
 }
 
-/// Build a request ApiMessage.
+/// Build a request `ApiMessage`.
 pub fn request(method: &str, params: Option<serde_json::Value>) -> ApiMessage {
     ApiMessage {
         msg_type: MessageType::Request,

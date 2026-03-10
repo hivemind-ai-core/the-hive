@@ -1,4 +1,4 @@
-//! Server config screen: port, host_port, db_path.
+//! Server config screen: port, `host_port`, `db_path`.
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
