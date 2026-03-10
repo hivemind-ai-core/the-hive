@@ -31,12 +31,14 @@ struct CreateParams {
     creator_agent_id: Option<String>,
 }
 
-pub fn create(pool: &DbPool, params: Option<Value>) -> Result<Value> {
+pub fn create(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<Value> {
     let p: CreateParams = serde_json::from_value(params.unwrap_or(Value::Null))?;
     if p.title.trim().is_empty() {
         anyhow::bail!("title must not be empty");
     }
-    let topic = Topic::new(p.title, p.content, p.creator_agent_id);
+    // Use the connection's agent_id as creator (server-side enforcement).
+    let creator = if agent_id.is_empty() { p.creator_agent_id } else { Some(agent_id.to_string()) };
+    let topic = Topic::new(p.title, p.content, creator);
     db_mb::insert_topic(pool, &topic)?;
     Ok(serde_json::to_value(&topic)?)
 }
@@ -57,7 +59,7 @@ pub fn list_new(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     Ok(serde_json::to_value(&topics)?)
 }
 
-pub fn comment(pool: &DbPool, registry: &AgentRegistry, params: Option<Value>) -> Result<Value> {
+pub fn comment(pool: &DbPool, registry: &AgentRegistry, agent_id: &str, params: Option<Value>) -> Result<Value> {
     use hive_core::types::Comment;
     #[derive(serde::Deserialize)]
     struct CommentParams {
@@ -66,7 +68,9 @@ pub fn comment(pool: &DbPool, registry: &AgentRegistry, params: Option<Value>) -
         creator_agent_id: Option<String>,
     }
     let p: CommentParams = serde_json::from_value(params.unwrap_or(Value::Null))?;
-    let comment = Comment::new(p.topic_id, p.content, p.creator_agent_id);
+    // Use the connection's agent_id as creator (server-side enforcement).
+    let creator = if agent_id.is_empty() { p.creator_agent_id } else { Some(agent_id.to_string()) };
+    let comment = Comment::new(p.topic_id, p.content, creator);
     db_mb::insert_comment(pool, &comment)?;
 
     // Send @mention notifications.

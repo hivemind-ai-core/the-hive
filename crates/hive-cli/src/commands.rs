@@ -179,9 +179,14 @@ pub async fn stop(project_dir: &Path, remove: bool) -> Result<()> {
     Ok(())
 }
 
-/// `hive restart` — restart all containers.
+/// `hive restart` — stop, remove, and recreate all containers to pick up config changes.
+///
+/// This always recreates containers so that env var changes, tag changes, mount changes,
+/// and other config modifications in `.hive/config.toml` take effect immediately.
+/// Volume data (`.hive/`, project dir) persists across recreation.
 pub async fn restart(project_dir: &Path) -> Result<()> {
-    stop(project_dir, false).await?;
+    println!("Stopping and removing containers (will recreate with current config)…");
+    stop(project_dir, true).await?;
     start(project_dir).await
 }
 
@@ -514,6 +519,8 @@ pub fn auth_status(project_dir: &Path) -> Result<()> {
                 let host_ok  = check("~/.claude.json (host login)", claude_json_host.exists());
                 let hive_ok  = check(".hive/claude.json (synced creds)", claude_json_hive.exists());
                 let dir_ok   = check("~/.claude/ (settings dir)", claude_dir_host.exists());
+                let creds_host_ok = check("~/.claude/.credentials.json (OAuth creds)", claude_dir_host.join(".credentials.json").exists());
+                let creds_hive_ok = check(".hive/claude-credentials.json (synced OAuth creds)", hive.join("claude-credentials.json").exists());
                 let key_ok   = dotenv_keys.iter().any(|l| l.contains("ANTHROPIC_API_KEY"));
                 let _key_msg = check(".hive/.env ANTHROPIC_API_KEY", key_ok);
 
@@ -523,7 +530,7 @@ pub fn auth_status(project_dir: &Path) -> Result<()> {
                     println!("       Subscription: hive auth sync  (copies ~/.claude.json)");
                     println!("                  or hive auth login (login inside container)");
                 }
-                let _ = dir_ok;
+                let _ = (dir_ok, creds_host_ok, creds_hive_ok);
             }
             "kilo" => {
                 let dir_ok  = check("~/.kilocode/ (kilo settings)", kilocode_dir_host.exists());
@@ -556,23 +563,37 @@ fn check(label: &str, present: bool) -> bool {
     present
 }
 
-/// `hive auth sync` — copy ~/.claude.json to .hive/claude.json for use in agent containers.
+/// `hive auth sync` — copy ~/.claude.json and ~/.claude/.credentials.json to .hive/ for use in agent containers.
 pub fn auth_sync(project_dir: &Path) -> Result<()> {
-    let src = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?
-        .join(".claude.json");
+    let home = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
+    let hive = hive_dir(project_dir);
 
-    if !src.exists() {
+    let config_src = home.join(".claude.json");
+    let creds_src = home.join(".claude/.credentials.json");
+
+    if !config_src.exists() && !creds_src.exists() {
         anyhow::bail!(
-            "~/.claude.json not found.\n\
+            "Neither ~/.claude.json nor ~/.claude/.credentials.json found.\n\
              Run 'claude auth login' on the host first, or use 'hive auth login' to authenticate inside a container."
         );
     }
 
-    let dst = hive_dir(project_dir).join("claude.json");
-    std::fs::copy(&src, &dst).context("copying ~/.claude.json to .hive/claude.json")?;
-    println!("Copied ~/.claude.json → .hive/claude.json");
-    println!("The credentials will be auto-mounted as /home/agent/.claude.json in claude agent containers.");
+    if config_src.exists() {
+        let dst = hive.join("claude.json");
+        std::fs::copy(&config_src, &dst).context("copying ~/.claude.json to .hive/claude.json")?;
+        println!("Copied ~/.claude.json → .hive/claude.json");
+    }
+
+    if creds_src.exists() {
+        let dst = hive.join("claude-credentials.json");
+        std::fs::copy(&creds_src, &dst).context("copying ~/.claude/.credentials.json to .hive/claude-credentials.json")?;
+        println!("Copied ~/.claude/.credentials.json → .hive/claude-credentials.json");
+    } else {
+        println!("Note: ~/.claude/.credentials.json not found (OAuth credentials may not be set up).");
+    }
+
+    println!("Files will be auto-mounted in claude agent containers.");
     println!("Run 'hive restart' to apply to running containers.");
     Ok(())
 }
@@ -693,8 +714,10 @@ pub async fn auth_login(project_dir: &Path, email: Option<&str>) -> Result<()> {
         anyhow::bail!("claude auth login exited with status {status}");
     }
 
-    // Copy credentials from the container back to .hive/claude.json.
-    let dst = hive_dir(project_dir).join("claude.json");
+    // Copy credentials from the container back to .hive/.
+    let hive = hive_dir(project_dir);
+
+    let dst = hive.join("claude.json");
     let src_in_container = format!("{container}:/home/agent/.claude.json");
     let cp_status = std::process::Command::new("docker")
         .args(["cp", &src_in_container, dst.to_str().unwrap_or(".")])
@@ -702,7 +725,24 @@ pub async fn auth_login(project_dir: &Path, email: Option<&str>) -> Result<()> {
         .context("copying .claude.json from container")?;
 
     if cp_status.success() {
-        println!("Credentials saved to .hive/claude.json");
+        println!("Copied .claude.json → .hive/claude.json");
+    } else {
+        println!("Warning: could not copy .claude.json from container.");
+    }
+
+    // Also copy OAuth credentials if they were created.
+    let creds_dst = hive.join("claude-credentials.json");
+    let creds_src = format!("{container}:/home/agent/.claude/.credentials.json");
+    let creds_status = std::process::Command::new("docker")
+        .args(["cp", &creds_src, creds_dst.to_str().unwrap_or(".")])
+        .status()
+        .context("copying .credentials.json from container")?;
+
+    if creds_status.success() {
+        println!("Copied .credentials.json → .hive/claude-credentials.json");
+    }
+
+    if cp_status.success() || creds_status.success() {
         println!("Run 'hive restart' to mount the new credentials into all agent containers.");
     } else {
         println!("Warning: could not copy credentials from container. Try 'hive auth sync' after authenticating on the host.");

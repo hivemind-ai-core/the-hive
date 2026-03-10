@@ -25,9 +25,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && npm install -g pnpm bun \
     && rm -rf /var/lib/apt/lists/*
 
-# Rust toolchain (for Rust projects)
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+# Rust toolchain (for Rust projects) — installed globally via CARGO_HOME/RUSTUP_HOME
+ENV RUSTUP_HOME="/usr/local/rustup" CARGO_HOME="/usr/local/cargo"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+ENV PATH="/usr/local/cargo/bin:${PATH}"
 
 # Kilo Code
 RUN npm install -g @kilocode/cli

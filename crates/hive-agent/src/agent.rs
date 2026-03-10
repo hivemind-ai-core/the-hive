@@ -180,7 +180,7 @@ impl Agent {
     }
 
     fn spawn_push_only(agent: Agent, messages: Vec<PushMessage>) {
-        let Agent { agent_id, coding_agent, cmd_tx, active_tasks, last_status, .. } = agent;
+        let Agent { agent_id, coding_agent, cmd_tx, active_tasks, last_status, push_cache, .. } = agent;
         let message_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
         tokio::spawn(async move {
             // active_tasks already incremented synchronously in on_push_notify.
@@ -197,6 +197,31 @@ impl Agent {
                 );
                 if let Err(e) = cmd_tx.send(ClientCmd::Send(ack)) {
                     warn!("Failed to send push.ack after push-only run: {e}");
+                }
+            }
+
+            // Drain messages that arrived while this push-only run was executing.
+            let post_push: Vec<PushMessage> = push_cache
+                .lock()
+                .map(|mut c| c.drain(..).collect())
+                .unwrap_or_default();
+
+            if !post_push.is_empty() {
+                info!(
+                    "Processing {} push message(s) received during push-only execution",
+                    post_push.len()
+                );
+                let post_ids: Vec<String> = post_push.iter().map(|m| m.id.clone()).collect();
+                match crate::executor::run_push_only(&coding_agent, &agent_id, &post_push).await {
+                    Ok(r) => info!("Post-push-only execution finished (exit {})", r.exit_code),
+                    Err(e) => warn!("Post-push-only execution failed: {e}"),
+                }
+                let ack = client::request(
+                    "push.ack",
+                    Some(serde_json::json!({ "message_ids": post_ids })),
+                );
+                if let Err(e) = cmd_tx.send(ClientCmd::Send(ack)) {
+                    warn!("Failed to send push.ack after post-push-only: {e}");
                 }
             }
 

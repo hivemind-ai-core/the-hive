@@ -289,6 +289,12 @@ async fn create_agent_container(
         if claude_json.exists() {
             binds.push(format!("{}:/home/agent/.claude.json:ro", claude_json.display()));
         }
+
+        // Mount synced OAuth credentials (.hive/claude-credentials.json) if present.
+        let creds_file = std::path::Path::new(hive_dir).join("claude-credentials.json");
+        if creds_file.exists() {
+            binds.push(format!("{}:/home/agent/.claude/.credentials.json:ro", creds_file.display()));
+        }
     }
 
     // Mount kilo config: prefer per-agent .hive/kilocode-{name}/, then project-local
@@ -308,7 +314,11 @@ async fn create_agent_container(
     }
 
     // Build env: fixed hive vars first, then caller-supplied extras.
+    // HOME must be set explicitly because the UID override (--user) can cause
+    // the shell to resolve HOME to a different user's directory (e.g. /home/ubuntu
+    // for UID 1000 on Ubuntu). Credential mounts target /home/agent/.
     let mut env: Vec<String> = vec![
+        "HOME=/home/agent".to_string(),
         format!("HIVE_AGENT_ID={}", agent.name),
         format!("HIVE_AGENT_NAME={}", agent.name),
         format!("HIVE_AGENT_TAGS={}", agent.tags.join(",")),
