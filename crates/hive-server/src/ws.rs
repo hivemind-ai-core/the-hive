@@ -170,6 +170,14 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
             &msg.id,
             handlers::message_board::comment(&state.db, &state.agents, agent_id, msg.params),
         ),
+        "topic.mark_read" => handle(
+            &msg.id,
+            handlers::message_board::mark_read(&state.db, agent_id, msg.params),
+        ),
+        "topic.unread" => handle(
+            &msg.id,
+            handlers::message_board::unread(&state.db, agent_id),
+        ),
         "topic.wait" => handle(
             &msg.id,
             handlers::message_board::wait(&state.db, msg.params).await,
@@ -182,6 +190,10 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
         "agent.status" => handle(
             &msg.id,
             handlers::agents::status(&state.agents, &state.db, agent_id, msg.params),
+        ),
+        "agent.clear_stale" => handle(
+            &msg.id,
+            handlers::agents::clear_stale(&state.db, &state.agents),
         ),
         "agent.heartbeat" => handle(
             &msg.id,
@@ -210,7 +222,9 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
                     broadcast_tasks(state);
                 }
             }
-            "agent.register" | "agent.heartbeat" | "agent.status" => broadcast_agents(state),
+            "agent.register" | "agent.heartbeat" | "agent.status" | "agent.clear_stale" => {
+                broadcast_agents(state)
+            }
             "topic.create" | "topic.comment" => broadcast_topics(state),
             _ => {}
         }

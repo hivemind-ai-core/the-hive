@@ -70,12 +70,17 @@ pub struct Topic {
     pub creator_agent_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub last_updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub comment_count: usize,
+    #[serde(default)]
+    pub last_updated_by: Option<String>,
 }
 
 impl Topic {
     #[must_use]
     pub fn new(title: String, content: String, creator_agent_id: Option<String>) -> Self {
         let now = Utc::now();
+        let last_updated_by = creator_agent_id.clone();
         Self {
             id: Uuid::new_v4().to_string(),
             title,
@@ -83,6 +88,8 @@ impl Topic {
             creator_agent_id,
             created_at: now,
             last_updated_at: now,
+            comment_count: 0,
+            last_updated_by,
         }
     }
 }

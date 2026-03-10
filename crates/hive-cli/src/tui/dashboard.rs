@@ -1,5 +1,6 @@
 //! Dashboard screen: agent status + task queue preview.
 
+use chrono::Utc;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -10,6 +11,7 @@ use ratatui::{
 
 use super::app::{App, Screen};
 use super::state::AppState;
+use hive_core::types::Agent;
 
 pub fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let tabs = [
@@ -55,12 +57,8 @@ fn render_agents(f: &mut Frame, area: Rect, state: &AppState) {
         .agents
         .iter()
         .map(|a| {
-            let status_style = if a.connected_at.is_some() {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-            Row::new(vec![a.name.clone(), "connected".to_string()]).style(status_style)
+            let (status_label, status_style) = agent_status(a);
+            Row::new(vec![a.name.clone(), status_label]).style(status_style)
         })
         .collect();
     let table = Table::new(
@@ -70,6 +68,21 @@ fn render_agents(f: &mut Frame, area: Rect, state: &AppState) {
     .header(Row::new(vec!["Agent", "Status"]).style(Style::default().add_modifier(Modifier::BOLD)))
     .block(block);
     f.render_widget(table, area);
+}
+
+fn agent_status(a: &Agent) -> (String, Style) {
+    let staleness = a.last_seen_at.map(|t| (Utc::now() - t).num_seconds());
+    match staleness {
+        None | Some(i64::MIN..=-1) => ("stale".into(), Style::default().fg(Color::Red)),
+        Some(secs) if secs > 300 => ("timed out".into(), Style::default().fg(Color::Red)),
+        Some(secs) if secs > 60 => (
+            "degraded".into(),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::DIM),
+        ),
+        _ => ("connected".into(), Style::default().fg(Color::Green)),
+    }
 }
 
 fn render_tasks(f: &mut Frame, area: Rect, state: &AppState) {

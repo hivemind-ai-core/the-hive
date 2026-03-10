@@ -105,6 +105,20 @@ pub fn status(
     Ok(serde_json::json!({ "ok": true }))
 }
 
+/// Handle `agent.clear_stale`: remove agents from the DB that are not connected
+/// and whose `last_seen_at` is older than 5 minutes.
+pub fn clear_stale(pool: &DbPool, registry: &AgentRegistry) -> Result<Value> {
+    let connected_ids: Vec<String> = registry
+        .lock()
+        .map_err(|_| anyhow::anyhow!("registry lock poisoned"))?
+        .keys()
+        .cloned()
+        .collect();
+    let deleted = db_comm::delete_stale_agents(pool, 300, &connected_ids)?;
+    info!("Cleared {deleted} stale agent(s)");
+    Ok(serde_json::json!({ "ok": true, "deleted": deleted }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

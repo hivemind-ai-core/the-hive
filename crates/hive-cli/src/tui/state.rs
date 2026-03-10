@@ -35,6 +35,8 @@ pub struct TopicSummary {
     pub title: String,
     pub comment_count: usize,
     pub last_updated: Option<String>,
+    pub creator: Option<String>,
+    pub last_updated_by: Option<String>,
 }
 
 #[derive(Default)]
@@ -48,4 +50,5 @@ pub struct AppState {
     pub selected_agent_idx: usize,
     pub topic_detail_id: Option<String>,
     pub topic_comments: Vec<Comment>,
+    pub unread_topic_ids: Vec<String>,
 }

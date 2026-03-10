@@ -186,6 +186,23 @@ pub fn get(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     }))
 }
 
+/// Handle `topic.mark_read { topic_id }`: mark a topic as read by the calling client.
+pub fn mark_read(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<Value> {
+    let topic_id = params
+        .as_ref()
+        .and_then(|v| v.get("topic_id"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("params.topic_id is required"))?;
+    db_mb::mark_topic_read(pool, agent_id, topic_id)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+/// Handle `topic.unread`: return list of topic IDs with unread content for the calling client.
+pub fn unread(pool: &DbPool, agent_id: &str) -> Result<Value> {
+    let ids = db_mb::unread_topic_ids(pool, agent_id)?;
+    Ok(serde_json::to_value(&ids)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

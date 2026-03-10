@@ -17,6 +17,7 @@ pub struct StateUpdate {
     pub topics: Vec<Topic>,
     pub topic_detail_id: Option<String>,
     pub topic_comments: Vec<Comment>,
+    pub unread_topic_ids: Option<Vec<String>>,
 }
 
 /// Commands sent from the TUI to the poller to perform server actions.
@@ -49,6 +50,10 @@ pub enum TuiCmd {
         status: String,
     },
     FetchTopic {
+        topic_id: String,
+    },
+    ClearStaleAgents,
+    MarkTopicRead {
         topic_id: String,
     },
 }
@@ -85,6 +90,7 @@ async fn run(
                 topics: vec![],
                 topic_detail_id: None,
                 topic_comments: vec![],
+                unread_topic_ids: None,
             })
             .is_err()
         {
@@ -107,11 +113,13 @@ async fn connect_and_listen(
     let mut topics: Vec<Topic> = vec![];
     let mut topic_detail_id: Option<String> = None;
     let mut topic_comments: Vec<Comment> = vec![];
+    let mut unread_topic_ids: Vec<String> = vec![];
 
     // Seed initial state.
     send_request(&mut ws, "seed-agents", "agent.list", None).await?;
     send_request(&mut ws, "seed-tasks", "task.list", None).await?;
     send_request(&mut ws, "seed-topics", "topic.list", None).await?;
+    send_request(&mut ws, "seed-unread", "topic.unread", None).await?;
 
     loop {
         tokio::select! {
@@ -142,6 +150,10 @@ async fn connect_and_listen(
                                 topics = serde_json::from_value(result).unwrap_or_default();
                                 true
                             }
+                            "seed-unread" | "refresh-unread" => {
+                                unread_topic_ids = serde_json::from_value(result).unwrap_or_default();
+                                true
+                            }
                             "fetch-topic" => {
                                 if let Some(id) = result.get("topic").and_then(|t| t.get("id")).and_then(|v| v.as_str()) {
                                     topic_detail_id = Some(id.to_string());
@@ -168,6 +180,8 @@ async fn connect_and_listen(
                             }
                             "topics.updated" => {
                                 topics = serde_json::from_value(params).unwrap_or_default();
+                                // Refresh unread state when topics change.
+                                let _ = send_request(&mut ws, "refresh-unread", "topic.unread", None).await;
                                 true
                             }
                             _ => false,
@@ -182,6 +196,7 @@ async fn connect_and_listen(
                     topics: topics.clone(),
                     topic_detail_id: topic_detail_id.clone(),
                     topic_comments: topic_comments.clone(),
+                    unread_topic_ids: Some(unread_topic_ids.clone()),
                 }).is_err() {
                     return Ok(()); // TUI has exited
                 }
@@ -244,6 +259,29 @@ async fn connect_and_listen(
                             "fetch-topic",
                             "topic.get",
                             Some(serde_json::json!({ "id": topic_id })),
+                        ).await;
+                    }
+                    TuiCmd::MarkTopicRead { topic_id } => {
+                        let _ = send_request(
+                            &mut ws,
+                            "mark-read",
+                            "topic.mark_read",
+                            Some(serde_json::json!({ "topic_id": topic_id })),
+                        ).await;
+                        // Refresh unread state after marking read.
+                        let _ = send_request(
+                            &mut ws,
+                            "refresh-unread",
+                            "topic.unread",
+                            None,
+                        ).await;
+                    }
+                    TuiCmd::ClearStaleAgents => {
+                        let _ = send_request(
+                            &mut ws,
+                            &uuid::Uuid::new_v4().to_string(),
+                            "agent.clear_stale",
+                            None,
                         ).await;
                     }
                 }

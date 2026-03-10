@@ -84,6 +84,8 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (2, include_str!("migrations/002_message_board.sql")),
     (3, include_str!("migrations/003_communication.sql")),
     (4, include_str!("migrations/004_indexes.sql")),
+    (5, include_str!("migrations/005_topic_read_state.sql")),
+    (6, include_str!("migrations/006_topic_last_updated_by.sql")),
 ];
 
 #[cfg(test)]
@@ -119,6 +121,7 @@ mod tests {
             "comments",
             "push_messages",
             "agents",
+            "topic_read_state",
             "schema_migrations",
         ] {
             let count: i64 = conn

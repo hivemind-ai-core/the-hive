@@ -9,8 +9,8 @@ use crate::db::DbPool;
 pub fn insert_topic(pool: &DbPool, topic: &Topic) -> Result<()> {
     let conn = pool.get()?;
     conn.execute(
-        "INSERT INTO topics (id, title, content, creator_agent_id, created_at, last_updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO topics (id, title, content, creator_agent_id, created_at, last_updated_at, last_updated_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             topic.id,
             topic.title,
@@ -18,6 +18,7 @@ pub fn insert_topic(pool: &DbPool, topic: &Topic) -> Result<()> {
             topic.creator_agent_id,
             topic.created_at.to_rfc3339(),
             topic.last_updated_at.to_rfc3339(),
+            topic.last_updated_by,
         ],
     )
     .context("inserting topic")?;
@@ -27,7 +28,7 @@ pub fn insert_topic(pool: &DbPool, topic: &Topic) -> Result<()> {
 pub fn get_topic(pool: &DbPool, id: &str) -> Result<Option<Topic>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
-        "SELECT id, title, content, creator_agent_id, created_at, last_updated_at
+        "SELECT id, title, content, creator_agent_id, created_at, last_updated_at, last_updated_by
          FROM topics WHERE id = ?1",
     )?;
     let mut rows = stmt.query(params![id])?;
@@ -41,10 +42,11 @@ pub fn get_topic(pool: &DbPool, id: &str) -> Result<Option<Topic>> {
 pub fn list_topics(pool: &DbPool) -> Result<Vec<Topic>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
-        "SELECT id, title, content, creator_agent_id, created_at, last_updated_at
-         FROM topics ORDER BY last_updated_at DESC",
+        "SELECT t.id, t.title, t.content, t.creator_agent_id, t.created_at, t.last_updated_at, t.last_updated_by,
+                (SELECT COUNT(*) FROM comments c WHERE c.topic_id = t.id) AS comment_count
+         FROM topics t ORDER BY t.last_updated_at DESC",
     )?;
-    let rows = stmt.query_map([], row_to_topic)?;
+    let rows = stmt.query_map([], |row| row_to_topic_with_count(row))?;
     rows.map(|r| r.context("reading topic row")).collect()
 }
 
@@ -52,7 +54,7 @@ pub fn list_topics(pool: &DbPool) -> Result<Vec<Topic>> {
 pub fn list_topics_since(pool: &DbPool, since_unix: i64) -> Result<Vec<Topic>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
-        "SELECT id, title, content, creator_agent_id, created_at, last_updated_at
+        "SELECT id, title, content, creator_agent_id, created_at, last_updated_at, last_updated_by
          FROM topics WHERE CAST(strftime('%s', last_updated_at) AS INTEGER) > ?1
          ORDER BY last_updated_at DESC",
     )?;
@@ -74,10 +76,14 @@ pub fn insert_comment(pool: &DbPool, comment: &Comment) -> Result<()> {
         ],
     )
     .context("inserting comment")?;
-    // Bump topic's last_updated_at
+    // Bump topic's last_updated_at and last_updated_by
     conn.execute(
-        "UPDATE topics SET last_updated_at = ?2 WHERE id = ?1",
-        params![comment.topic_id, comment.created_at.to_rfc3339()],
+        "UPDATE topics SET last_updated_at = ?2, last_updated_by = ?3 WHERE id = ?1",
+        params![
+            comment.topic_id,
+            comment.created_at.to_rfc3339(),
+            comment.creator_agent_id
+        ],
     )
     .context("updating topic last_updated_at")?;
     Ok(())
@@ -91,6 +97,35 @@ pub fn get_comments(pool: &DbPool, topic_id: &str) -> Result<Vec<Comment>> {
     )?;
     let rows = stmt.query_map(params![topic_id], row_to_comment)?;
     rows.map(|r| r.context("reading comment row")).collect()
+}
+
+// -- read state --
+
+/// Mark a topic as read by a client at the current time.
+pub fn mark_topic_read(pool: &DbPool, client_id: &str, topic_id: &str) -> Result<()> {
+    let conn = pool.get()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO topic_read_state (client_id, topic_id, last_read_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(client_id, topic_id) DO UPDATE SET last_read_at = excluded.last_read_at",
+        params![client_id, topic_id, now],
+    )
+    .context("marking topic read")?;
+    Ok(())
+}
+
+/// Return topic IDs that have unread content for a given client.
+/// A topic is unread if it has no read state entry or if `last_updated_at > last_read_at`.
+pub fn unread_topic_ids(pool: &DbPool, client_id: &str) -> Result<Vec<String>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT t.id FROM topics t
+         LEFT JOIN topic_read_state rs ON rs.topic_id = t.id AND rs.client_id = ?1
+         WHERE rs.last_read_at IS NULL OR t.last_updated_at > rs.last_read_at",
+    )?;
+    let rows = stmt.query_map(params![client_id], |row| row.get(0))?;
+    rows.map(|r| r.context("reading unread topic id")).collect()
 }
 
 // -- helpers --
@@ -115,7 +150,16 @@ fn row_to_topic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Topic> {
         creator_agent_id: row.get(3)?,
         created_at,
         last_updated_at,
+        comment_count: 0,
+        last_updated_by: row.get(6)?,
     })
+}
+
+fn row_to_topic_with_count(row: &rusqlite::Row<'_>) -> rusqlite::Result<Topic> {
+    let mut topic = row_to_topic(row)?;
+    let count: i64 = row.get(7)?;
+    topic.comment_count = count as usize;
+    Ok(topic)
 }
 
 fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {

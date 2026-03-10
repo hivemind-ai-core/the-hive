@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use super::state::{AppState, TaskSummary};
+use super::util::strip_ansi;
 
 fn status_color(status: &str) -> Color {
     match status {
@@ -107,14 +108,14 @@ fn render_detail(f: &mut Frame, area: Rect, task: Option<&TaskSummary>, scroll: 
             if let Some(ref desc) = t.description {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled("Description:", bold)));
-                for l in desc.lines() {
+                for l in strip_ansi(desc).lines() {
                     lines.push(Line::from(Span::raw(l.to_string())));
                 }
             }
             if let Some(ref result) = t.result {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled("Result:", bold)));
-                for l in result.lines() {
+                for l in strip_ansi(result).lines() {
                     lines.push(Line::from(Span::raw(l.to_string())));
                 }
             }

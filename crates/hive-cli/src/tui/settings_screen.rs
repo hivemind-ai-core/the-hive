@@ -21,7 +21,7 @@ pub fn render(f: &mut Frame, area: Rect, config: Option<&Config>) {
         .split(area);
 
     render_config(f, chunks[0], config);
-    render_api_keys(f, chunks[1]);
+    render_agent_auth(f, chunks[1], config);
     render_docker_controls(f, chunks[2]);
 }
 
@@ -83,41 +83,40 @@ fn render_config(f: &mut Frame, area: Rect, config: Option<&Config>) {
     }
 }
 
-fn key_status(var: &str) -> (String, Color) {
-    match std::env::var(var) {
-        Ok(v) if !v.is_empty() => (format!("set ({} chars)", v.len()), Color::Green),
-        _ => ("not set".to_string(), Color::Red),
+fn render_agent_auth(f: &mut Frame, area: Rect, config: Option<&Config>) {
+    let block = Block::default()
+        .title("Agent Authentication")
+        .borders(Borders::ALL);
+    match config {
+        None => {
+            f.render_widget(Paragraph::new("No configuration loaded").block(block), area);
+        }
+        Some(cfg) if cfg.agents.is_empty() => {
+            f.render_widget(Paragraph::new("No agents configured").block(block), area);
+        }
+        Some(cfg) => {
+            let bold = Style::default().add_modifier(Modifier::BOLD);
+            let lines: Vec<Line> = cfg
+                .agents
+                .iter()
+                .map(|a| {
+                    let auth_mode = if a.auth.is_empty() { "none" } else { &a.auth };
+                    let (auth_label, auth_color) = match auth_mode {
+                        "synced" => ("synced", Color::Green),
+                        "api_key" => ("api_key", Color::Yellow),
+                        "none" => ("none", Color::DarkGray),
+                        other => (other, Color::Magenta),
+                    };
+                    Line::from(vec![
+                        Span::styled(format!("{:<20}", a.name), bold),
+                        Span::styled(format!("{:<12}", a.coding_agent), Style::default().fg(Color::Cyan)),
+                        Span::styled(format!("auth: {auth_label}"), Style::default().fg(auth_color)),
+                    ])
+                })
+                .collect();
+            f.render_widget(Paragraph::new(lines).block(block), area);
+        }
     }
-}
-
-fn render_api_keys(f: &mut Frame, area: Rect) {
-    let keys = [
-        ("ANTHROPIC_API_KEY", "Claude / Sonnet agents"),
-        ("OPENAI_API_KEY", "OpenAI agents"),
-        ("KILO_API_KEY", "Kilo coding agent"),
-    ];
-    let lines: Vec<Line> = keys
-        .iter()
-        .map(|(var, desc)| {
-            let (status, color) = key_status(var);
-            Line::from(vec![
-                Span::styled(
-                    format!("{var:<22}"),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("{status:<18}"), Style::default().fg(color)),
-                Span::styled(format!("# {desc}"), Style::default().fg(Color::DarkGray)),
-            ])
-        })
-        .collect();
-    f.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title("API Keys (from environment)")
-                .borders(Borders::ALL),
-        ),
-        area,
-    );
 }
 
 fn render_docker_controls(f: &mut Frame, area: Rect) {

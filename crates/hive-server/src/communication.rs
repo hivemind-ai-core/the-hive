@@ -95,6 +95,41 @@ pub fn touch_agent(pool: &DbPool, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Delete agents whose `last_seen_at` is older than `threshold_secs` seconds
+/// and that are NOT currently connected (i.e., not in the in-memory registry).
+pub fn delete_stale_agents(
+    pool: &DbPool,
+    threshold_secs: i64,
+    connected_ids: &[String],
+) -> Result<usize> {
+    let conn = pool.get()?;
+    let cutoff = (Utc::now() - chrono::Duration::seconds(threshold_secs)).to_rfc3339();
+    // Build placeholders for connected IDs to exclude.
+    if connected_ids.is_empty() {
+        let deleted = conn
+            .execute(
+                "DELETE FROM agents WHERE last_seen_at < ?1 OR last_seen_at IS NULL",
+                params![cutoff],
+            )
+            .context("deleting stale agents")?;
+        return Ok(deleted);
+    }
+    // Exclude currently connected agents.
+    let placeholders: Vec<String> = connected_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 2)).collect();
+    let sql = format!(
+        "DELETE FROM agents WHERE (last_seen_at < ?1 OR last_seen_at IS NULL) AND id NOT IN ({})",
+        placeholders.join(", ")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(cutoff)];
+    for id in connected_ids {
+        param_values.push(Box::new(id.clone()));
+    }
+    let refs: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+    let deleted = stmt.execute(refs.as_slice()).context("deleting stale agents")?;
+    Ok(deleted)
+}
+
 // -- helpers --
 
 fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<PushMessage> {

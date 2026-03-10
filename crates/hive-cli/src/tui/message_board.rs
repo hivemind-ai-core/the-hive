@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use super::state::AppState;
+use super::util::strip_ansi;
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let chunks = Layout::default()
@@ -18,6 +19,16 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     render_topic_list(f, chunks[0], state);
     render_topic_detail(f, chunks[1], state);
+}
+
+/// Resolve an agent ID to its display name, falling back to the raw ID.
+fn resolve_agent_name<'a>(state: &'a AppState, agent_id: &'a str) -> &'a str {
+    state
+        .agents
+        .iter()
+        .find(|a| a.id == agent_id)
+        .map(|a| a.name.as_str())
+        .unwrap_or(agent_id)
 }
 
 fn render_topic_detail(f: &mut Frame, area: Rect, state: &AppState) {
@@ -34,10 +45,19 @@ fn render_topic_detail(f: &mut Frame, area: Rect, state: &AppState) {
         Some(t) => {
             let last = t.last_updated.as_deref().unwrap_or("-");
             let loaded = state.topic_detail_id.as_deref() == Some(t.id.as_str());
+            let creator = t
+                .creator
+                .as_deref()
+                .map(|id| resolve_agent_name(state, id))
+                .unwrap_or("-");
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled("Title: ", Style::default().add_modifier(Modifier::BOLD)),
                     Span::raw(&t.title),
+                ]),
+                Line::from(vec![
+                    Span::styled("Creator: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(creator, Style::default().fg(Color::Cyan)),
                 ]),
                 Line::from(vec![
                     Span::styled("Updated: ", Style::default().add_modifier(Modifier::BOLD)),
@@ -53,10 +73,14 @@ fn render_topic_detail(f: &mut Frame, area: Rect, state: &AppState) {
                 )));
                 lines.push(Line::from(""));
                 for comment in &state.topic_comments {
-                    let from = comment.creator_agent_id.as_deref().unwrap_or("?");
+                    let from = comment
+                        .creator_agent_id
+                        .as_deref()
+                        .map(|id| resolve_agent_name(state, id))
+                        .unwrap_or("?");
                     lines.push(Line::from(vec![
                         Span::styled(format!("[{from}] "), Style::default().fg(Color::Cyan)),
-                        Span::raw(&comment.content),
+                        Span::raw(strip_ansi(&comment.content)),
                     ]));
                 }
             } else {
@@ -88,6 +112,7 @@ fn render_topic_list(f: &mut Frame, area: Rect, state: &AppState) {
         .iter()
         .enumerate()
         .map(|(i, t)| {
+            let is_unread = state.unread_topic_ids.contains(&t.id);
             let style = if i == selected {
                 Style::default()
                     .bg(Color::Blue)
@@ -95,14 +120,23 @@ fn render_topic_list(f: &mut Frame, area: Rect, state: &AppState) {
             } else {
                 Style::default()
             };
-            ListItem::new(Line::from(vec![
-                Span::raw(&t.title),
-                Span::styled(
-                    format!(" [{}]", t.comment_count),
+            let mut spans = vec![];
+            if is_unread {
+                spans.push(Span::styled("● ", Style::default().fg(Color::Yellow)));
+            }
+            spans.push(Span::raw(&t.title));
+            spans.push(Span::styled(
+                format!(" [{}]", t.comment_count),
+                Style::default().fg(Color::DarkGray),
+            ));
+            if let Some(ref updater_id) = t.last_updated_by {
+                let name = resolve_agent_name(state, updater_id);
+                spans.push(Span::styled(
+                    format!(" by {name}"),
                     Style::default().fg(Color::DarkGray),
-                ),
-            ]))
-            .style(style)
+                ));
+            }
+            ListItem::new(Line::from(spans)).style(style)
         })
         .collect();
 

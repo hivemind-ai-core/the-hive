@@ -407,6 +407,9 @@ impl App {
                         let _ = tx.send(TuiCmd::FetchTopic {
                             topic_id: topic.id.clone(),
                         });
+                        let _ = tx.send(TuiCmd::MarkTopicRead {
+                            topic_id: topic.id.clone(),
+                        });
                     }
                 }
             }
@@ -437,6 +440,11 @@ impl App {
                     let rt = tokio::runtime::Runtime::new().unwrap();
                     let _ = rt.block_on(crate::commands::stop(&dir, true));
                 });
+            }
+            Action::Char('d') if self.screen == Screen::Agents => {
+                if let Some(ref tx) = self.cmd_tx {
+                    let _ = tx.send(TuiCmd::ClearStaleAgents);
+                }
             }
             Action::Char('p') if self.screen == Screen::Agents => {
                 if !self.state.agents.is_empty() {
@@ -670,13 +678,18 @@ pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<(
                 .map(|t| super::state::TopicSummary {
                     id: t.id.clone(),
                     title: t.title.clone(),
-                    comment_count: 0,
+                    comment_count: t.comment_count,
                     last_updated: Some(t.last_updated_at.to_rfc3339()),
+                    creator: t.creator_agent_id.clone(),
+                    last_updated_by: t.last_updated_by.clone(),
                 })
                 .collect();
             if update.topic_detail_id.is_some() {
                 app.state.topic_detail_id = update.topic_detail_id;
                 app.state.topic_comments = update.topic_comments;
+            }
+            if let Some(unread) = update.unread_topic_ids {
+                app.state.unread_topic_ids = unread;
             }
         }
 
@@ -712,7 +725,7 @@ pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<(
                         "n:new  e:edit  s:cycle  r:reset  x:cancel  ↑↓:select  []:scroll  q:quit"
                     }
                     Screen::MessageBoard => "n:new topic  c:comment  q:quit",
-                    Screen::Agents => "p:push message  q:quit",
+                    Screen::Agents => "p:push message  d:clear stale  q:quit",
                     Screen::Settings => "s:start  S:stop  r:restart  R:reset  q:quit",
                     _ => "Tab:switch screens  1-5:go to screen  q:quit",
                 }
