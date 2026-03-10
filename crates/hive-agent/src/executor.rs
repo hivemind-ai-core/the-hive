@@ -327,3 +327,93 @@ pub async fn run_push_only(
         output: combined,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hive_core::types::TaskStatus;
+
+    fn make_test_task(title: &str) -> Task {
+        Task {
+            id: "task-1".to_string(),
+            title: title.to_string(),
+            description: None,
+            status: TaskStatus::InProgress,
+            assigned_agent_id: Some("agent-1".to_string()),
+            tags: vec![],
+            result: None,
+            position: 0,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    // ── build_prompt ────────────────────────────────────────────────────────
+
+    #[test]
+    fn build_prompt_contains_agent_identity() {
+        let task = make_test_task("Test Task");
+        let prompt = build_prompt(&task, "agent-42", &[]);
+        assert!(prompt.contains("You are agent `agent-42`"));
+    }
+
+    #[test]
+    fn build_prompt_contains_tool_guide() {
+        let task = make_test_task("Test Task");
+        let prompt = build_prompt(&task, "agent-1", &[]);
+        assert!(prompt.contains("task.get_next"));
+        assert!(prompt.contains("task.complete"));
+        assert!(prompt.contains("push.send"));
+        assert!(prompt.contains("topic.create"));
+    }
+
+    #[test]
+    fn build_prompt_contains_task_title() {
+        let task = make_test_task("Build the widget");
+        let prompt = build_prompt(&task, "agent-1", &[]);
+        assert!(prompt.contains("# Task: Build the widget"));
+    }
+
+    #[test]
+    fn build_prompt_contains_description() {
+        let mut task = make_test_task("Test");
+        task.description = Some("Detailed instructions here".to_string());
+        let prompt = build_prompt(&task, "agent-1", &[]);
+        assert!(prompt.contains("Detailed instructions here"));
+    }
+
+    #[test]
+    fn build_prompt_contains_tags() {
+        let mut task = make_test_task("Test");
+        task.tags = vec!["rust".to_string(), "backend".to_string()];
+        let prompt = build_prompt(&task, "agent-1", &[]);
+        assert!(prompt.contains("Tags: rust, backend"));
+    }
+
+    #[test]
+    fn build_prompt_no_tags_section_when_empty() {
+        let task = make_test_task("Test");
+        let prompt = build_prompt(&task, "agent-1", &[]);
+        assert!(!prompt.contains("Tags:"));
+    }
+
+    #[test]
+    fn build_prompt_includes_push_messages() {
+        let task = make_test_task("Test");
+        let msgs = vec![
+            PushMessage::new("agent-1".to_string(), "Hello!".to_string(), Some("agent-2".to_string())),
+            PushMessage::new("agent-1".to_string(), "Follow up".to_string(), None),
+        ];
+        let prompt = build_prompt(&task, "agent-1", &msgs);
+        assert!(prompt.contains("# Messages from other agents"));
+        assert!(prompt.contains("[agent-2]: Hello!"));
+        assert!(prompt.contains("[server]: Follow up"));
+    }
+
+    #[test]
+    fn build_prompt_no_messages_section_when_empty() {
+        let task = make_test_task("Test");
+        let prompt = build_prompt(&task, "agent-1", &[]);
+        assert!(!prompt.contains("Messages from other agents"));
+    }
+}

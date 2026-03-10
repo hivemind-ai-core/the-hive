@@ -18,6 +18,7 @@ use uuid::Uuid;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Commands sent from the agent logic to the client task.
+#[derive(Debug)]
 pub enum ClientCmd {
     Send(ApiMessage),
     Shutdown,
@@ -209,5 +210,132 @@ pub async fn send_request(
             warn!("Request timed out after {REQUEST_TIMEOUT:?}");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── request ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn request_builds_correct_message() {
+        let msg = request("task.create", Some(serde_json::json!({"title": "Test"})));
+        assert_eq!(msg.msg_type, MessageType::Request);
+        assert_eq!(msg.method.as_deref(), Some("task.create"));
+        assert_eq!(msg.params.as_ref().unwrap()["title"], "Test");
+        assert!(msg.result.is_none());
+        assert!(msg.error.is_none());
+        assert!(!msg.id.is_empty());
+    }
+
+    #[test]
+    fn request_with_no_params() {
+        let msg = request("push.list", None);
+        assert_eq!(msg.method.as_deref(), Some("push.list"));
+        assert!(msg.params.is_none());
+    }
+
+    #[test]
+    fn request_generates_unique_ids() {
+        let msg1 = request("a", None);
+        let msg2 = request("b", None);
+        assert_ne!(msg1.id, msg2.id);
+    }
+
+    // ── route_message ───────────────────────────────────────────────────────
+
+    #[test]
+    fn route_response_to_pending_caller() {
+        let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+        let (push_tx, mut push_rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = oneshot::channel();
+
+        pending.lock().unwrap().insert("req-1".to_string(), tx);
+
+        let response = ApiMessage {
+            msg_type: MessageType::Response,
+            id: "req-1".to_string(),
+            method: None,
+            params: None,
+            result: Some(serde_json::json!({"ok": true})),
+            error: None,
+        };
+
+        route_message(response, &pending, &push_tx);
+
+        // Caller should receive the response
+        let received = rx.try_recv().unwrap();
+        assert_eq!(received.result.unwrap()["ok"], true);
+
+        // Push channel should be empty
+        assert!(push_rx.try_recv().is_err());
+
+        // Pending map should be cleared
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn route_error_to_pending_caller() {
+        let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+        let (push_tx, _push_rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = oneshot::channel();
+
+        pending.lock().unwrap().insert("req-1".to_string(), tx);
+
+        let error = ApiMessage {
+            msg_type: MessageType::Error,
+            id: "req-1".to_string(),
+            method: None,
+            params: None,
+            result: None,
+            error: Some(hive_core::types::ApiError { code: 500, message: "boom".to_string() }),
+        };
+
+        route_message(error, &pending, &push_tx);
+
+        let received = rx.try_recv().unwrap();
+        assert_eq!(received.error.unwrap().code, 500);
+    }
+
+    #[test]
+    fn route_push_message_to_push_channel() {
+        let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+        let (push_tx, mut push_rx) = mpsc::unbounded_channel();
+
+        let push = ApiMessage {
+            msg_type: MessageType::Push,
+            id: "push-1".to_string(),
+            method: Some("task.assign".to_string()),
+            params: Some(serde_json::json!({"task": {}})),
+            result: None,
+            error: None,
+        };
+
+        route_message(push, &pending, &push_tx);
+
+        let received = push_rx.try_recv().unwrap();
+        assert_eq!(received.method.as_deref(), Some("task.assign"));
+    }
+
+    #[test]
+    fn route_response_without_pending_goes_to_push() {
+        let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+        let (push_tx, mut push_rx) = mpsc::unbounded_channel();
+
+        let orphan = ApiMessage {
+            msg_type: MessageType::Response,
+            id: "orphan".to_string(),
+            method: None,
+            params: None,
+            result: Some(serde_json::json!(42)),
+            error: None,
+        };
+
+        route_message(orphan, &pending, &push_tx);
+
+        // Falls through to push channel
+        assert!(push_rx.try_recv().is_ok());
     }
 }

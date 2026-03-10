@@ -94,3 +94,58 @@ pub async fn call(ws: &mut WsClient, method: &str, params: Value) -> Response {
         }
     }
 }
+
+// ── Push / notification helpers ─────────────────────────────────────────────
+
+/// Read the next push message from the WebSocket (non-response, server-initiated).
+///
+/// Returns the full parsed JSON value of the push message.
+/// Times out after `timeout` to avoid hanging tests.
+pub async fn recv_push(ws: &mut WsClient, timeout: std::time::Duration) -> Option<Value> {
+    let deadline = tokio::time::sleep(timeout);
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            _ = &mut deadline => return None,
+            frame = ws.next() => {
+                match frame {
+                    Some(Ok(Message::Text(t))) => {
+                        let v: Value = serde_json::from_str(&t).unwrap();
+                        // Push messages have type "push" (not "response")
+                        if v["type"].as_str() == Some("push") {
+                            return Some(v);
+                        }
+                        // Skip response messages (they belong to `call`)
+                    }
+                    _ => return None,
+                }
+            }
+        }
+    }
+}
+
+/// Read the next push message matching a specific method.
+///
+/// Skips push messages that don't match `method`. Times out after `timeout`.
+pub async fn recv_push_method(ws: &mut WsClient, method: &str, timeout: std::time::Duration) -> Option<Value> {
+    let deadline = tokio::time::sleep(timeout);
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            _ = &mut deadline => return None,
+            frame = ws.next() => {
+                match frame {
+                    Some(Ok(Message::Text(t))) => {
+                        let v: Value = serde_json::from_str(&t).unwrap();
+                        if v["type"].as_str() == Some("push") && v["method"].as_str() == Some(method) {
+                            return Some(v);
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+        }
+    }
+}

@@ -282,3 +282,59 @@ fn broadcast_agents(state: &AppState) {
         Err(e) => warn!("broadcast_agents query error: {e}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn make_push_has_correct_type_and_method() {
+        let msg = make_push(serde_json::json!({"foo": "bar"}));
+        assert_eq!(msg.msg_type, MessageType::Push);
+        assert_eq!(msg.method.as_deref(), Some("push"));
+        assert_eq!(msg.params.as_ref().unwrap()["foo"], "bar");
+        assert!(msg.result.is_none());
+        assert!(msg.error.is_none());
+    }
+
+    #[test]
+    fn make_push_has_unique_ids() {
+        let msg1 = make_push(serde_json::json!({}));
+        let msg2 = make_push(serde_json::json!({}));
+        assert_ne!(msg1.id, msg2.id);
+    }
+
+    #[test]
+    fn make_response_has_correct_shape() {
+        let msg = make_response("req-1", serde_json::json!({"ok": true}));
+        assert_eq!(msg.msg_type, MessageType::Response);
+        assert_eq!(msg.id, "req-1");
+        assert!(msg.method.is_none());
+        assert_eq!(msg.result.as_ref().unwrap()["ok"], true);
+        assert!(msg.error.is_none());
+    }
+
+    #[test]
+    fn make_error_has_correct_shape() {
+        let msg = make_error("req-2", 404, "not found".to_string());
+        assert_eq!(msg.msg_type, MessageType::Error);
+        assert_eq!(msg.id, "req-2");
+        let err = msg.error.unwrap();
+        assert_eq!(err.code, 404);
+        assert_eq!(err.message, "not found");
+    }
+
+    #[test]
+    fn handle_ok_returns_response() {
+        let msg = handle("req-1", Ok(serde_json::json!(42)));
+        assert_eq!(msg.msg_type, MessageType::Response);
+        assert_eq!(msg.result.unwrap(), 42);
+    }
+
+    #[test]
+    fn handle_err_returns_error() {
+        let msg = handle("req-1", Err(anyhow::anyhow!("boom")));
+        assert_eq!(msg.msg_type, MessageType::Error);
+        assert!(msg.error.unwrap().message.contains("boom"));
+    }
+}

@@ -98,3 +98,163 @@ pub fn status(registry: &AgentRegistry, _pool: &DbPool, agent_id: &str, params: 
     // so the agent receives the response before any task.assign push.
     Ok(serde_json::json!({ "ok": true }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{agent_registry, db};
+    use serde_json::json;
+    use tokio::sync::mpsc;
+
+    fn open_test_db() -> crate::db::DbPool {
+        let pool = db::open(":memory:").unwrap();
+        db::run_migrations(&pool).unwrap();
+        pool
+    }
+
+    fn setup_registry_with_agent(id: &str) -> (crate::agent_registry::AgentRegistry, mpsc::UnboundedReceiver<axum::extract::ws::Message>) {
+        let registry = agent_registry::new_registry();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let state = agent_registry::AgentState::new(id.to_string(), tx);
+        registry.lock().unwrap().insert(id.to_string(), state);
+        (registry, rx)
+    }
+
+    // ── list handler ────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_returns_empty_on_no_agents() {
+        let pool = open_test_db();
+        let result = list(&pool).unwrap();
+        assert!(result.as_array().unwrap().is_empty());
+    }
+
+    // ── register handler ────────────────────────────────────────────────────
+
+    #[test]
+    fn register_creates_agent_in_db() {
+        let pool = open_test_db();
+        let (registry, _rx) = setup_registry_with_agent("agent-1");
+
+        let result = register(&pool, &registry, Some(json!({
+            "id": "agent-1",
+            "name": "Test Agent"
+        }))).unwrap();
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["agent_id"], "agent-1");
+
+        // Agent should be in DB
+        let agents = list(&pool).unwrap();
+        assert_eq!(agents.as_array().unwrap().len(), 1);
+        assert_eq!(agents[0]["id"], "agent-1");
+    }
+
+    #[test]
+    fn register_with_tags_and_capacity() {
+        let pool = open_test_db();
+        let (registry, _rx) = setup_registry_with_agent("agent-1");
+
+        register(&pool, &registry, Some(json!({
+            "id": "agent-1",
+            "name": "Agent",
+            "tags": ["rust", "backend"],
+            "capacity_max": 3
+        }))).unwrap();
+
+        // Verify registry was updated
+        let agents = registry.lock().unwrap();
+        let state = agents.get("agent-1").unwrap();
+        assert!(state.registered());
+        assert_eq!(state.tags(), &["rust", "backend"]);
+        assert_eq!(state.capacity_max, 3);
+    }
+
+    #[test]
+    fn register_empty_id_rejected() {
+        let pool = open_test_db();
+        let registry = agent_registry::new_registry();
+        assert!(register(&pool, &registry, Some(json!({"id": "", "name": "N"}))).is_err());
+    }
+
+    #[test]
+    fn register_whitespace_id_rejected() {
+        let pool = open_test_db();
+        let registry = agent_registry::new_registry();
+        assert!(register(&pool, &registry, Some(json!({"id": "  ", "name": "N"}))).is_err());
+    }
+
+    #[test]
+    fn register_missing_id_rejected() {
+        let pool = open_test_db();
+        let registry = agent_registry::new_registry();
+        assert!(register(&pool, &registry, Some(json!({"name": "N"}))).is_err());
+    }
+
+    #[test]
+    fn register_missing_name_rejected() {
+        let pool = open_test_db();
+        let registry = agent_registry::new_registry();
+        assert!(register(&pool, &registry, Some(json!({"id": "a"}))).is_err());
+    }
+
+    #[test]
+    fn register_resets_orphaned_tasks() {
+        let pool = open_test_db();
+        let (registry, _rx) = setup_registry_with_agent("agent-1");
+
+        // Create and claim a task
+        let task = hive_core::types::Task::new("Orphan".to_string(), None, vec![]);
+        crate::tasks::insert_task(&pool, &task).unwrap();
+        crate::tasks::get_next(&pool, "agent-1", None).unwrap();
+
+        // Verify it's in-progress
+        let tasks = crate::tasks::list_tasks(&pool, Some("in-progress"), None, None).unwrap();
+        assert_eq!(tasks.len(), 1);
+
+        // Register resets orphaned tasks
+        register(&pool, &registry, Some(json!({"id": "agent-1", "name": "Agent"}))).unwrap();
+
+        // Task should be back to pending (or re-dispatched — but we verify not in-progress for this agent)
+        let tasks = crate::tasks::list_tasks(&pool, Some("pending"), None, None).unwrap();
+        assert_eq!(tasks.len(), 1);
+    }
+
+    #[test]
+    fn register_default_capacity_is_1() {
+        let pool = open_test_db();
+        let (registry, _rx) = setup_registry_with_agent("agent-1");
+
+        register(&pool, &registry, Some(json!({"id": "agent-1", "name": "Agent"}))).unwrap();
+
+        let agents = registry.lock().unwrap();
+        assert_eq!(agents["agent-1"].capacity_max, 1);
+    }
+
+    // ── status handler ──────────────────────────────────────────────────────
+
+    #[test]
+    fn status_updates_active_tasks() {
+        let (registry, _rx) = setup_registry_with_agent("agent-1");
+        let pool = open_test_db();
+
+        let result = status(&registry, &pool, "agent-1", Some(json!({"active_tasks": 2}))).unwrap();
+        assert_eq!(result["ok"], true);
+
+        let agents = registry.lock().unwrap();
+        assert_eq!(agents["agent-1"].active_tasks, 2);
+    }
+
+    #[test]
+    fn status_unknown_agent_errors() {
+        let registry = agent_registry::new_registry();
+        let pool = open_test_db();
+        assert!(status(&registry, &pool, "ghost", Some(json!({"active_tasks": 0}))).is_err());
+    }
+
+    #[test]
+    fn status_missing_active_tasks_errors() {
+        let (registry, _rx) = setup_registry_with_agent("agent-1");
+        let pool = open_test_db();
+        assert!(status(&registry, &pool, "agent-1", Some(json!({}))).is_err());
+    }
+}

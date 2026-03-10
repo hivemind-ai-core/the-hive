@@ -102,7 +102,7 @@ pub fn comment(pool: &DbPool, registry: &AgentRegistry, agent_id: &str, params: 
 
 /// Extract `@agent-id` mentions from comment content.
 /// Strips trailing punctuation so `@agent,` and `@agent.` work correctly.
-fn extract_mentions(content: &str) -> Vec<String> {
+pub(crate) fn extract_mentions(content: &str) -> Vec<String> {
     content
         .split_whitespace()
         .filter_map(|word| {
@@ -160,4 +160,217 @@ pub fn get(pool: &DbPool, params: Option<Value>) -> Result<Value> {
         "topic": topic,
         "comments": comments,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use serde_json::json;
+
+    fn open_test_db() -> crate::db::DbPool {
+        let pool = db::open(":memory:").unwrap();
+        db::run_migrations(&pool).unwrap();
+        pool
+    }
+
+    // ── extract_mentions ────────────────────────────────────────────────────
+
+    #[test]
+    fn extract_simple_mention() {
+        assert_eq!(extract_mentions("hello @agent-1"), vec!["agent-1"]);
+    }
+
+    #[test]
+    fn extract_multiple_mentions() {
+        let result = extract_mentions("@agent-1 and @agent-2 should coordinate");
+        assert_eq!(result, vec!["agent-1", "agent-2"]);
+    }
+
+    #[test]
+    fn extract_mention_with_trailing_punctuation() {
+        assert_eq!(extract_mentions("ping @agent-1,"), vec!["agent-1"]);
+        assert_eq!(extract_mentions("ping @agent-1."), vec!["agent-1"]);
+        assert_eq!(extract_mentions("ping @agent-1!"), vec!["agent-1"]);
+        assert_eq!(extract_mentions("ping @agent-1?"), vec!["agent-1"]);
+    }
+
+    #[test]
+    fn extract_mention_with_underscores() {
+        assert_eq!(extract_mentions("hey @my_agent"), vec!["my_agent"]);
+    }
+
+    #[test]
+    fn extract_no_mentions() {
+        assert!(extract_mentions("no mentions here").is_empty());
+    }
+
+    #[test]
+    fn extract_bare_at_sign_ignored() {
+        assert!(extract_mentions("@ alone").is_empty());
+    }
+
+    #[test]
+    fn extract_at_in_email_not_matched() {
+        // "user@domain" has no space before @, so it's treated as one word without @ prefix
+        assert!(extract_mentions("user@domain.com").is_empty());
+    }
+
+    #[test]
+    fn extract_mention_at_start() {
+        assert_eq!(extract_mentions("@agent-1 do this"), vec!["agent-1"]);
+    }
+
+    #[test]
+    fn extract_mention_at_end() {
+        assert_eq!(extract_mentions("check this @agent-1"), vec!["agent-1"]);
+    }
+
+    // ── create handler ──────────────────────────────────────────────────────
+
+    #[test]
+    fn create_topic_with_valid_params() {
+        let pool = open_test_db();
+        let result = create(&pool, "agent-1", Some(json!({
+            "title": "Test Topic",
+            "content": "Body text"
+        }))).unwrap();
+        assert_eq!(result["title"], "Test Topic");
+        assert_eq!(result["content"], "Body text");
+        assert_eq!(result["creator_agent_id"], "agent-1");
+    }
+
+    #[test]
+    fn create_topic_empty_title_rejected() {
+        let pool = open_test_db();
+        assert!(create(&pool, "agent-1", Some(json!({"title": "", "content": "c"}))).is_err());
+    }
+
+    #[test]
+    fn create_topic_missing_title_rejected() {
+        let pool = open_test_db();
+        assert!(create(&pool, "agent-1", Some(json!({"content": "c"}))).is_err());
+    }
+
+    #[test]
+    fn create_topic_missing_content_rejected() {
+        let pool = open_test_db();
+        assert!(create(&pool, "agent-1", Some(json!({"title": "T"}))).is_err());
+    }
+
+    // ── list handler ────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_topics_empty() {
+        let pool = open_test_db();
+        let result = list(&pool, None).unwrap();
+        assert!(result.as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_topics_returns_created() {
+        let pool = open_test_db();
+        create(&pool, "a", Some(json!({"title": "T1", "content": "c"}))).unwrap();
+        create(&pool, "a", Some(json!({"title": "T2", "content": "c"}))).unwrap();
+        let result = list(&pool, None).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 2);
+    }
+
+    // ── list_new handler ────────────────────────────────────────────────────
+
+    #[test]
+    fn list_new_since_zero_returns_all() {
+        let pool = open_test_db();
+        create(&pool, "a", Some(json!({"title": "T1", "content": "c"}))).unwrap();
+        let result = list_new(&pool, Some(json!({"since": 0}))).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn list_new_future_since_returns_empty() {
+        let pool = open_test_db();
+        create(&pool, "a", Some(json!({"title": "T1", "content": "c"}))).unwrap();
+        let result = list_new(&pool, Some(json!({"since": 9999999999_i64}))).unwrap();
+        assert!(result.as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_new_default_since_returns_all() {
+        let pool = open_test_db();
+        create(&pool, "a", Some(json!({"title": "T1", "content": "c"}))).unwrap();
+        let result = list_new(&pool, None).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 1);
+    }
+
+    // ── get handler ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn get_topic_with_comments() {
+        let pool = open_test_db();
+        let registry = agent_registry::new_registry();
+        let topic = create(&pool, "a", Some(json!({"title": "T", "content": "c"}))).unwrap();
+        let topic_id = topic["id"].as_str().unwrap();
+
+        comment(&pool, &registry, "a", Some(json!({"topic_id": topic_id, "content": "Reply"}))).unwrap();
+
+        let result = get(&pool, Some(json!({"id": topic_id}))).unwrap();
+        assert_eq!(result["topic"]["title"], "T");
+        assert_eq!(result["comments"].as_array().unwrap().len(), 1);
+        assert_eq!(result["comments"][0]["content"], "Reply");
+    }
+
+    #[test]
+    fn get_unknown_topic_errors() {
+        let pool = open_test_db();
+        assert!(get(&pool, Some(json!({"id": "ghost"}))).is_err());
+    }
+
+    #[test]
+    fn get_missing_id_errors() {
+        let pool = open_test_db();
+        assert!(get(&pool, Some(json!({}))).is_err());
+    }
+
+    // ── comment handler ─────────────────────────────────────────────────────
+
+    #[test]
+    fn comment_on_existing_topic() {
+        let pool = open_test_db();
+        let registry = agent_registry::new_registry();
+        let topic = create(&pool, "a", Some(json!({"title": "T", "content": "c"}))).unwrap();
+        let topic_id = topic["id"].as_str().unwrap();
+
+        let result = comment(&pool, &registry, "a", Some(json!({
+            "topic_id": topic_id,
+            "content": "Hello!"
+        }))).unwrap();
+        assert_eq!(result["content"], "Hello!");
+        assert_eq!(result["creator_agent_id"], "a");
+    }
+
+    #[test]
+    fn comment_on_unknown_topic_errors() {
+        let pool = open_test_db();
+        let registry = agent_registry::new_registry();
+        assert!(comment(&pool, &registry, "a", Some(json!({
+            "topic_id": "ghost",
+            "content": "Hello"
+        }))).is_err());
+    }
+
+    #[test]
+    fn comment_missing_topic_id_errors() {
+        let pool = open_test_db();
+        let registry = agent_registry::new_registry();
+        assert!(comment(&pool, &registry, "a", Some(json!({"content": "Hello"}))).is_err());
+    }
+
+    #[test]
+    fn comment_missing_content_errors() {
+        let pool = open_test_db();
+        let registry = agent_registry::new_registry();
+        let topic = create(&pool, "a", Some(json!({"title": "T", "content": "c"}))).unwrap();
+        let topic_id = topic["id"].as_str().unwrap();
+        assert!(comment(&pool, &registry, "a", Some(json!({"topic_id": topic_id}))).is_err());
+    }
 }
