@@ -45,8 +45,7 @@ pub fn list_topics(pool: &DbPool) -> Result<Vec<Topic>> {
          FROM topics ORDER BY last_updated_at DESC",
     )?;
     let rows = stmt.query_map([], row_to_topic)?;
-    rows.map(|r| r.context("reading topic row"))
-        .collect()
+    rows.map(|r| r.context("reading topic row")).collect()
 }
 
 /// Return topics whose `last_updated_at` is strictly after the given Unix timestamp.
@@ -91,8 +90,7 @@ pub fn get_comments(pool: &DbPool, topic_id: &str) -> Result<Vec<Comment>> {
          FROM comments WHERE topic_id = ?1 ORDER BY created_at ASC",
     )?;
     let rows = stmt.query_map(params![topic_id], row_to_comment)?;
-    rows.map(|r| r.context("reading comment row"))
-        .collect()
+    rows.map(|r| r.context("reading comment row")).collect()
 }
 
 // -- helpers --
@@ -258,13 +256,19 @@ mod tests {
         let pool = open_test_db();
         let topic = make_topic("Bumpy");
         insert_topic(&pool, &topic).unwrap();
-        let before = get_topic(&pool, &topic.id).unwrap().unwrap().last_updated_at;
+        let before = get_topic(&pool, &topic.id)
+            .unwrap()
+            .unwrap()
+            .last_updated_at;
         std::thread::sleep(std::time::Duration::from_millis(5));
         let mut comment = make_comment(&topic.id, "bump");
         // Advance created_at so the bump is detectable.
         comment.created_at = chrono::Utc::now();
         insert_comment(&pool, &comment).unwrap();
-        let after = get_topic(&pool, &topic.id).unwrap().unwrap().last_updated_at;
+        let after = get_topic(&pool, &topic.id)
+            .unwrap()
+            .unwrap()
+            .last_updated_at;
         assert!(after >= before, "last_updated_at should be bumped");
     }
 

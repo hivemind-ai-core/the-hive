@@ -4,8 +4,8 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::client;
-use crate::mcp::server::McpState;
 use crate::mcp::rpc::call_server;
+use crate::mcp::server::McpState;
 
 pub async fn get_next(state: &McpState, params: Option<Value>) -> Result<Value> {
     let tag = params.as_ref().and_then(|v| v.get("tag")).cloned();

@@ -149,7 +149,9 @@ pub struct Agent {
     pub capacity_max: u8,
 }
 
-fn default_capacity_max() -> u8 { 1 }
+fn default_capacity_max() -> u8 {
+    1
+}
 
 #[cfg(test)]
 mod tests {
@@ -239,7 +241,11 @@ mod tests {
 
     #[test]
     fn task_roundtrip_json() {
-        let task = Task::new("Round Trip".to_string(), Some("desc".to_string()), vec!["tag1".to_string()]);
+        let task = Task::new(
+            "Round Trip".to_string(),
+            Some("desc".to_string()),
+            vec!["tag1".to_string()],
+        );
         let json = serde_json::to_string(&task).unwrap();
         let decoded: Task = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.id, task.id);
@@ -253,7 +259,11 @@ mod tests {
 
     #[test]
     fn topic_new_defaults() {
-        let topic = Topic::new("My Topic".to_string(), "Content here".to_string(), Some("agent-1".to_string()));
+        let topic = Topic::new(
+            "My Topic".to_string(),
+            "Content here".to_string(),
+            Some("agent-1".to_string()),
+        );
         assert!(!topic.id.is_empty());
         assert_eq!(topic.title, "My Topic");
         assert_eq!(topic.content, "Content here");
@@ -275,7 +285,11 @@ mod tests {
 
     #[test]
     fn topic_roundtrip_json() {
-        let topic = Topic::new("Round".to_string(), "Trip".to_string(), Some("a".to_string()));
+        let topic = Topic::new(
+            "Round".to_string(),
+            "Trip".to_string(),
+            Some("a".to_string()),
+        );
         let json = serde_json::to_string(&topic).unwrap();
         let decoded: Topic = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.id, topic.id);
@@ -287,7 +301,11 @@ mod tests {
 
     #[test]
     fn comment_new_defaults() {
-        let c = Comment::new("topic-1".to_string(), "Hello".to_string(), Some("agent-2".to_string()));
+        let c = Comment::new(
+            "topic-1".to_string(),
+            "Hello".to_string(),
+            Some("agent-2".to_string()),
+        );
         assert!(!c.id.is_empty());
         assert_eq!(c.topic_id, "topic-1");
         assert_eq!(c.content, "Hello");
@@ -314,7 +332,11 @@ mod tests {
 
     #[test]
     fn push_message_new_defaults() {
-        let m = PushMessage::new("agent-b".to_string(), "ping".to_string(), Some("agent-a".to_string()));
+        let m = PushMessage::new(
+            "agent-b".to_string(),
+            "ping".to_string(),
+            Some("agent-a".to_string()),
+        );
         assert!(!m.id.is_empty());
         assert_eq!(m.to_agent_id, "agent-b");
         assert_eq!(m.content, "ping");
@@ -357,10 +379,22 @@ mod tests {
 
     #[test]
     fn message_type_serde() {
-        assert_eq!(serde_json::to_string(&MessageType::Request).unwrap(), "\"request\"");
-        assert_eq!(serde_json::to_string(&MessageType::Response).unwrap(), "\"response\"");
-        assert_eq!(serde_json::to_string(&MessageType::Push).unwrap(), "\"push\"");
-        assert_eq!(serde_json::to_string(&MessageType::Error).unwrap(), "\"error\"");
+        assert_eq!(
+            serde_json::to_string(&MessageType::Request).unwrap(),
+            "\"request\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MessageType::Response).unwrap(),
+            "\"response\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MessageType::Push).unwrap(),
+            "\"push\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MessageType::Error).unwrap(),
+            "\"error\""
+        );
     }
 
     #[test]
@@ -383,7 +417,10 @@ mod tests {
 
     #[test]
     fn api_error_serde() {
-        let err = ApiError { code: 404, message: "not found".to_string() };
+        let err = ApiError {
+            code: 404,
+            message: "not found".to_string(),
+        };
         let json = serde_json::to_string(&err).unwrap();
         let decoded: ApiError = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.code, 404);

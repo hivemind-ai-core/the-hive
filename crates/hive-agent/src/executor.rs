@@ -54,7 +54,9 @@ Use `push.send` for async one-way messages.
 pub fn build_prompt(task: &Task, agent_id: &str, messages: &[PushMessage]) -> String {
     let mut prompt = String::new();
 
-    prompt.push_str(&format!("# Your Identity\n\nYou are agent `{agent_id}`.\n\n"));
+    prompt.push_str(&format!(
+        "# Your Identity\n\nYou are agent `{agent_id}`.\n\n"
+    ));
     prompt.push_str(TOOL_GUIDE);
 
     if !messages.is_empty() {
@@ -108,11 +110,14 @@ fn write_mcp_configs(mcp_port: u16) {
         .entry("mcp")
         .or_insert_with(|| serde_json::json!({}));
     if let Some(servers) = mcp.as_object_mut() {
-        servers.insert("hive".to_string(), serde_json::json!({
-            "type": "remote",
-            "url": hive_url,
-            "enabled": true
-        }));
+        servers.insert(
+            "hive".to_string(),
+            serde_json::json!({
+                "type": "remote",
+                "url": hive_url,
+                "enabled": true
+            }),
+        );
     }
     let kilo_content = serde_json::to_string_pretty(&kilo_cfg).unwrap_or_default();
     if let Err(e) = std::fs::write(kilo_path, kilo_content) {
@@ -142,8 +147,7 @@ pub async fn run(
     let session_id = crate::session::load(agent_id);
 
     let mut cmd = Command::new(agent_bin);
-    cmd.env("TASK_ID", &task.id)
-        .env("TASK_TITLE", &task.title);
+    cmd.env("TASK_ID", &task.id).env("TASK_TITLE", &task.title);
 
     match agent_bin {
         "claude" => {
@@ -173,13 +177,18 @@ pub async fn run(
     let cmd_args: Vec<&str> = match agent_bin {
         "claude" => {
             let mut args = vec!["--dangerously-skip-permissions"];
-            if session_id.is_some() { args.extend(["-r", "<session>"]); }
-            args.push("-p"); args.push("<prompt>");
+            if session_id.is_some() {
+                args.extend(["-r", "<session>"]);
+            }
+            args.push("-p");
+            args.push("<prompt>");
             args
         }
         "kilo" => {
             let mut args = vec!["run", "--auto"];
-            if session_id.is_some() { args.extend(["-c", "-s", "<session>"]); }
+            if session_id.is_some() {
+                args.extend(["-c", "-s", "<session>"]);
+            }
             args.push("<prompt>");
             args
         }
@@ -198,15 +207,27 @@ pub async fn run(
             let exit_code = output.status.code().unwrap_or(-1);
             let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            let combined = if stderr.is_empty() { stdout.clone() } else { format!("{stdout}{stderr}") };
+            let combined = if stderr.is_empty() {
+                stdout.clone()
+            } else {
+                format!("{stdout}{stderr}")
+            };
             if exit_code == 0 {
                 info!("'{agent_bin}' finished successfully");
-                if !stdout.is_empty() { debug!("stdout: {}", stdout.trim()); }
-                if !stderr.is_empty() { debug!("stderr: {}", stderr.trim()); }
+                if !stdout.is_empty() {
+                    debug!("stdout: {}", stdout.trim());
+                }
+                if !stderr.is_empty() {
+                    debug!("stderr: {}", stderr.trim());
+                }
             } else {
                 warn!("'{agent_bin}' finished with exit code {exit_code}");
-                if !stderr.is_empty() { warn!("stderr: {}", stderr.trim()); }
-                if !stdout.is_empty() { warn!("stdout: {}", stdout.trim()); }
+                if !stderr.is_empty() {
+                    warn!("stderr: {}", stderr.trim());
+                }
+                if !stdout.is_empty() {
+                    warn!("stdout: {}", stdout.trim());
+                }
             }
             (exit_code, combined)
         }
@@ -215,7 +236,10 @@ pub async fn run(
             return Err(e).with_context(|| format!("spawning '{agent_bin}'"));
         }
         Err(_) => {
-            warn!("'{agent_bin}' timed out after 10m for task {} — killing", task.id);
+            warn!(
+                "'{agent_bin}' timed out after 10m for task {} — killing",
+                task.id
+            );
             (-1, "timed out after 10m".to_string())
         }
     };
@@ -262,7 +286,10 @@ pub async fn run_push_only(
     };
 
     let prompt = build_prompt(&task, agent_id, messages);
-    info!("Spawning '{agent_bin}' for push-only response ({} message(s))", messages.len());
+    info!(
+        "Spawning '{agent_bin}' for push-only response ({} message(s))",
+        messages.len()
+    );
 
     let mcp_port: u16 = std::env::var("HIVE_MCP_PORT")
         .ok()
@@ -274,7 +301,9 @@ pub async fn run_push_only(
     let mut cmd = Command::new(agent_bin);
     match agent_bin {
         "claude" => {
-            cmd.arg("--dangerously-skip-permissions").arg("-p").arg(&prompt);
+            cmd.arg("--dangerously-skip-permissions")
+                .arg("-p")
+                .arg(&prompt);
         }
         "kilo" => {
             cmd.args(["run", "--auto"]).arg(&prompt);
@@ -300,14 +329,26 @@ pub async fn run_push_only(
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
             if exit_code == 0 {
                 info!("'{agent_bin}' push-only run finished successfully");
-                if !stdout.is_empty() { debug!("stdout: {}", stdout.trim()); }
-                if !stderr.is_empty() { debug!("stderr: {}", stderr.trim()); }
+                if !stdout.is_empty() {
+                    debug!("stdout: {}", stdout.trim());
+                }
+                if !stderr.is_empty() {
+                    debug!("stderr: {}", stderr.trim());
+                }
             } else {
                 warn!("'{agent_bin}' push-only run finished with exit code {exit_code}");
-                if !stderr.is_empty() { warn!("stderr: {}", stderr.trim()); }
-                if !stdout.is_empty() { warn!("stdout: {}", stdout.trim()); }
+                if !stderr.is_empty() {
+                    warn!("stderr: {}", stderr.trim());
+                }
+                if !stdout.is_empty() {
+                    warn!("stdout: {}", stdout.trim());
+                }
             }
-            let combined = if stderr.is_empty() { stdout } else { format!("{stdout}{stderr}") };
+            let combined = if stderr.is_empty() {
+                stdout
+            } else {
+                format!("{stdout}{stderr}")
+            };
             (exit_code, combined)
         }
         Ok(Err(e)) => {
@@ -401,7 +442,11 @@ mod tests {
     fn build_prompt_includes_push_messages() {
         let task = make_test_task("Test");
         let msgs = vec![
-            PushMessage::new("agent-1".to_string(), "Hello!".to_string(), Some("agent-2".to_string())),
+            PushMessage::new(
+                "agent-1".to_string(),
+                "Hello!".to_string(),
+                Some("agent-2".to_string()),
+            ),
             PushMessage::new("agent-1".to_string(), "Follow up".to_string(), None),
         ];
         let prompt = build_prompt(&task, "agent-1", &msgs);

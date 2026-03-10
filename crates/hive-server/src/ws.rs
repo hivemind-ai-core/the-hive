@@ -2,10 +2,13 @@
 
 use anyhow::Result;
 use axum::{
-    Router,
-    extract::{Query, State, WebSocketUpgrade, ws::{Message, WebSocket}},
+    extract::{
+        ws::{Message, WebSocket},
+        Query, State, WebSocketUpgrade,
+    },
     response::IntoResponse,
     routing::get,
+    Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use hive_core::types::{ApiError, ApiMessage, MessageType};
@@ -17,9 +20,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_registry::{self, AgentState},
-    communication,
-    handlers,
-    message_board as db_mb,
+    communication, handlers, message_board as db_mb,
     state::AppState,
     tasks as db_tasks,
 };
@@ -136,39 +137,73 @@ async fn dispatch(agent_id: &str, text: &str, state: &AppState) {
     let response = match method {
         "ping" => make_response(&msg.id, serde_json::json!({ "pong": true })),
         "task.create" => handle(&msg.id, handlers::tasks::create(&state.db, msg.params)),
-        "task.list"   => handle(&msg.id, handlers::tasks::list(&state.db, msg.params)),
-        "task.get"    => handle(&msg.id, handlers::tasks::get(&state.db, msg.params)),
-        "task.update"    => handle(&msg.id, handlers::tasks::update(&state.db, msg.params)),
-        "task.get_next"      => handle(&msg.id, handlers::tasks::get_next(&state.db, agent_id, msg.params)),
-        "task.complete"      => handle(&msg.id, handlers::tasks::complete(&state.db, agent_id, msg.params)),
-        "task.split"         => handle(&msg.id, handlers::tasks::split(&state.db, msg.params)),
-        "task.set_dependency"=> handle(&msg.id, handlers::tasks::set_dependency(&state.db, msg.params)),
-        "topic.create"  => handle(&msg.id, handlers::message_board::create(&state.db, agent_id, msg.params)),
-        "topic.list"    => handle(&msg.id, handlers::message_board::list(&state.db, msg.params)),
-        "topic.list_new" => handle(&msg.id, handlers::message_board::list_new(&state.db, msg.params)),
-        "topic.get"     => handle(&msg.id, handlers::message_board::get(&state.db, msg.params)),
-        "topic.comment" => handle(&msg.id, handlers::message_board::comment(&state.db, &state.agents, agent_id, msg.params)),
-        "topic.wait"    => handle(&msg.id, handlers::message_board::wait(&state.db, msg.params).await),
-        "agent.register"  => handle(&msg.id, handlers::agents::register(&state.db, &state.agents, msg.params)),
-        "agent.list"      => handle(&msg.id, handlers::agents::list(&state.db)),
-        "agent.status"    => handle(&msg.id, handlers::agents::status(&state.agents, &state.db, agent_id, msg.params)),
-        "agent.heartbeat" => handle(&msg.id,
+        "task.list" => handle(&msg.id, handlers::tasks::list(&state.db, msg.params)),
+        "task.get" => handle(&msg.id, handlers::tasks::get(&state.db, msg.params)),
+        "task.update" => handle(&msg.id, handlers::tasks::update(&state.db, msg.params)),
+        "task.get_next" => handle(
+            &msg.id,
+            handlers::tasks::get_next(&state.db, agent_id, msg.params),
+        ),
+        "task.complete" => handle(
+            &msg.id,
+            handlers::tasks::complete(&state.db, agent_id, msg.params),
+        ),
+        "task.split" => handle(&msg.id, handlers::tasks::split(&state.db, msg.params)),
+        "task.set_dependency" => handle(
+            &msg.id,
+            handlers::tasks::set_dependency(&state.db, msg.params),
+        ),
+        "topic.create" => handle(
+            &msg.id,
+            handlers::message_board::create(&state.db, agent_id, msg.params),
+        ),
+        "topic.list" => handle(
+            &msg.id,
+            handlers::message_board::list(&state.db, msg.params),
+        ),
+        "topic.list_new" => handle(
+            &msg.id,
+            handlers::message_board::list_new(&state.db, msg.params),
+        ),
+        "topic.get" => handle(&msg.id, handlers::message_board::get(&state.db, msg.params)),
+        "topic.comment" => handle(
+            &msg.id,
+            handlers::message_board::comment(&state.db, &state.agents, agent_id, msg.params),
+        ),
+        "topic.wait" => handle(
+            &msg.id,
+            handlers::message_board::wait(&state.db, msg.params).await,
+        ),
+        "agent.register" => handle(
+            &msg.id,
+            handlers::agents::register(&state.db, &state.agents, msg.params),
+        ),
+        "agent.list" => handle(&msg.id, handlers::agents::list(&state.db)),
+        "agent.status" => handle(
+            &msg.id,
+            handlers::agents::status(&state.agents, &state.db, agent_id, msg.params),
+        ),
+        "agent.heartbeat" => handle(
+            &msg.id,
             communication::touch_agent(&state.db, agent_id)
-                .map(|_| serde_json::json!({ "ok": true }))
+                .map(|_| serde_json::json!({ "ok": true })),
         ),
         "push.send" => handle(
             &msg.id,
             handlers::push::send(&state.db, &state.agents, agent_id, msg.params),
         ),
         "push.list" => handle(&msg.id, handlers::push::list(&state.db, agent_id)),
-        "push.ack"  => handle(&msg.id, handlers::push::ack(&state.db, msg.params)),
+        "push.ack" => handle(&msg.id, handlers::push::ack(&state.db, msg.params)),
         _ => make_error(&msg.id, 404, format!("unknown method: {method}")),
     };
 
     // Broadcast state changes to all connected clients on successful mutations.
     if response.error.is_none() {
         match method {
-            "task.create" | "task.update" | "task.complete" | "task.split"
+            "task.create"
+            | "task.update"
+            | "task.complete"
+            | "task.split"
             | "task.set_dependency" => broadcast_tasks(state),
             "task.get_next" => {
                 if response.result.as_ref().is_some_and(|v| !v.is_null()) {

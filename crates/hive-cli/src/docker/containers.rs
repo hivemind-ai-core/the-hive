@@ -6,9 +6,9 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use bollard::{
-    Docker,
     models::{ContainerCreateBody, HostConfig, NetworkConnectRequest, PortBinding},
     query_parameters::ListContainersOptionsBuilder,
+    Docker,
 };
 use tracing::info;
 
@@ -16,21 +16,37 @@ use super::network::{agent_network_name, network_name};
 use crate::config::{Agent, Config};
 
 /// Image name for hive-server, scoped to the project.
-pub fn server_image(id: &str) -> String { format!("hive-server-{id}:latest") }
+pub fn server_image(id: &str) -> String {
+    format!("hive-server-{id}:latest")
+}
 /// Image name for hive-agent, scoped to the project.
-pub fn agent_image(id: &str) -> String  { format!("hive-agent-{id}:latest") }
+pub fn agent_image(id: &str) -> String {
+    format!("hive-agent-{id}:latest")
+}
 /// Image name for app-container, scoped to the project.
-pub fn app_image(id: &str) -> String    { format!("app-container-{id}:latest") }
+pub fn app_image(id: &str) -> String {
+    format!("app-container-{id}:latest")
+}
 
 /// Container name for hive-server.
-pub fn server_name(id: &str) -> String  { format!("hive-server-{id}") }
+pub fn server_name(id: &str) -> String {
+    format!("hive-server-{id}")
+}
 /// Container name for app.
-pub fn app_name(id: &str) -> String     { format!("hive-app-{id}") }
+pub fn app_name(id: &str) -> String {
+    format!("hive-app-{id}")
+}
 /// Container name for a named agent.
 pub fn agent_name(id: &str, agent: &str) -> String {
     let safe: String = agent
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     format!("hive-agent-{id}-{safe}")
 }
@@ -43,10 +59,10 @@ pub async fn orphaned_agent_names(
     known_names: &[String],
 ) -> Result<Vec<String>> {
     let prefix = format!("hive-agent-{id}-");
-    let opts = ListContainersOptionsBuilder::default()
-        .all(true)
-        .build();
-    let containers = docker.list_containers(Some(opts)).await
+    let opts = ListContainersOptionsBuilder::default().all(true).build();
+    let containers = docker
+        .list_containers(Some(opts))
+        .await
         .context("listing containers")?;
 
     let orphans = containers
@@ -62,10 +78,13 @@ pub async fn orphaned_agent_names(
 /// Connect an existing container to an additional network.
 pub async fn connect_to_network(docker: &Docker, container: &str, network: &str) -> Result<()> {
     docker
-        .connect_network(network, NetworkConnectRequest {
-            container: container.to_string(),
-            ..Default::default()
-        })
+        .connect_network(
+            network,
+            NetworkConnectRequest {
+                container: container.to_string(),
+                ..Default::default()
+            },
+        )
         .await
         .with_context(|| format!("connecting '{container}' to network '{network}'"))
 }
@@ -74,14 +93,18 @@ pub async fn connect_to_network(docker: &Docker, container: &str, network: &str)
 pub async fn image_exists(docker: &Docker, image: &str) -> Result<bool> {
     match docker.inspect_image(image).await {
         Ok(_) => Ok(true),
-        Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => Ok(false),
+        Err(bollard::errors::Error::DockerResponseServerError {
+            status_code: 404, ..
+        }) => Ok(false),
         Err(e) => Err(e).context("checking image existence"),
     }
 }
 
 /// Create the hive-server container.
 pub async fn create_server(docker: &Docker, cfg: &Config, project_dir: &Path) -> Result<String> {
-    let project_dir = project_dir.canonicalize().context("resolving project directory")?;
+    let project_dir = project_dir
+        .canonicalize()
+        .context("resolving project directory")?;
     let id = &cfg.project_id;
     let name = server_name(id);
     let net = network_name(id);
@@ -109,9 +132,7 @@ pub async fn create_server(docker: &Docker, cfg: &Config, project_dir: &Path) ->
             port_bindings: Some(port_bindings),
             network_mode: Some(net),
             // Mount .hive/ as /data (server stores its DB there)
-            binds: Some(vec![
-                format!("{}:/data", hive_dir.display()),
-            ]),
+            binds: Some(vec![format!("{}:/data", hive_dir.display())]),
             ..Default::default()
         }),
         ..Default::default()
@@ -119,9 +140,11 @@ pub async fn create_server(docker: &Docker, cfg: &Config, project_dir: &Path) ->
 
     let container_id = docker
         .create_container(
-            Some(bollard::query_parameters::CreateContainerOptionsBuilder::default()
-                .name(&name)
-                .build()),
+            Some(
+                bollard::query_parameters::CreateContainerOptionsBuilder::default()
+                    .name(&name)
+                    .build(),
+            ),
             body,
         )
         .await
@@ -134,7 +157,9 @@ pub async fn create_server(docker: &Docker, cfg: &Config, project_dir: &Path) ->
 
 /// Create the app-container.
 pub async fn create_app(docker: &Docker, cfg: &Config, project_dir: &Path) -> Result<String> {
-    let project_dir = project_dir.canonicalize().context("resolving project directory")?;
+    let project_dir = project_dir
+        .canonicalize()
+        .context("resolving project directory")?;
     let id = &cfg.project_id;
     let name = app_name(id);
     let net = network_name(id);
@@ -172,9 +197,11 @@ pub async fn create_app(docker: &Docker, cfg: &Config, project_dir: &Path) -> Re
 
     let container_id = docker
         .create_container(
-            Some(bollard::query_parameters::CreateContainerOptionsBuilder::default()
-                .name(&name)
-                .build()),
+            Some(
+                bollard::query_parameters::CreateContainerOptionsBuilder::default()
+                    .name(&name)
+                    .build(),
+            ),
             body,
         )
         .await
@@ -202,8 +229,14 @@ fn load_dotenv(path: &Path) -> HashMap<String, String> {
 }
 
 /// Create one hive-agent container per entry in `cfg.agents`.
-pub async fn create_agents(docker: &Docker, cfg: &Config, project_dir: &Path) -> Result<Vec<String>> {
-    let project_dir = project_dir.canonicalize().context("resolving project directory")?;
+pub async fn create_agents(
+    docker: &Docker,
+    cfg: &Config,
+    project_dir: &Path,
+) -> Result<Vec<String>> {
+    let project_dir = project_dir
+        .canonicalize()
+        .context("resolving project directory")?;
     let id = &cfg.project_id;
     let net = agent_network_name(id);
     let hive_dir = project_dir.join(".hive");
@@ -230,10 +263,23 @@ pub async fn create_agents(docker: &Docker, cfg: &Config, project_dir: &Path) ->
         merged_env.extend(agent.env.clone());
 
         match create_agent_container(
-            docker, id, &name, agent, &net, &server_url, &app_daemon_url,
-            &project_dir_str, &hive_dir.display().to_string(), mcp_port,
-            &cfg.logging.level, &merged_env, host_uid, host_gid,
-        ).await {
+            docker,
+            id,
+            &name,
+            agent,
+            &net,
+            &server_url,
+            &app_daemon_url,
+            &project_dir_str,
+            &hive_dir.display().to_string(),
+            mcp_port,
+            &cfg.logging.level,
+            &merged_env,
+            host_uid,
+            host_gid,
+        )
+        .await
+        {
             Ok(container_id) => {
                 info!("Created container '{name}' ({container_id})");
                 ids.push(container_id);
@@ -270,8 +316,10 @@ async fn create_agent_container(
         // Full .hive read-only so agents cannot modify shared config or other agents' files.
         format!("{hive_dir}:/app/.hive:ro"),
         // Per-agent session directory mounted rw; more-specific bind shadows the ro parent.
-        format!("{hive_dir}/agents/{agent_name}:/app/.hive/agents/{agent_name}",
-            agent_name = agent.name),
+        format!(
+            "{hive_dir}/agents/{agent_name}:/app/.hive/agents/{agent_name}",
+            agent_name = agent.name
+        ),
     ];
 
     // Auto-mount credential directories for known coding agents.
@@ -283,17 +331,28 @@ async fn create_agent_container(
             binds.push(format!("{}:/home/agent/.claude", cred_dir.display()));
         }
         // Also mount .hive/claude-{name}.json or .hive/claude.json if present.
-        let per_agent_claude = std::path::Path::new(hive_dir).join(format!("claude-{}.json", agent.name));
+        let per_agent_claude =
+            std::path::Path::new(hive_dir).join(format!("claude-{}.json", agent.name));
         let shared_claude = std::path::Path::new(hive_dir).join("claude.json");
-        let claude_json = if per_agent_claude.exists() { &per_agent_claude } else { &shared_claude };
+        let claude_json = if per_agent_claude.exists() {
+            &per_agent_claude
+        } else {
+            &shared_claude
+        };
         if claude_json.exists() {
-            binds.push(format!("{}:/home/agent/.claude.json:ro", claude_json.display()));
+            binds.push(format!(
+                "{}:/home/agent/.claude.json:ro",
+                claude_json.display()
+            ));
         }
 
         // Mount synced OAuth credentials (.hive/claude-credentials.json) if present.
         let creds_file = std::path::Path::new(hive_dir).join("claude-credentials.json");
         if creds_file.exists() {
-            binds.push(format!("{}:/home/agent/.claude/.credentials.json:ro", creds_file.display()));
+            binds.push(format!(
+                "{}:/home/agent/.claude/.credentials.json:ro",
+                creds_file.display()
+            ));
         }
     }
 
@@ -301,11 +360,15 @@ async fn create_agent_container(
     // .hive/kilocode/, then global ~/.kilocode/. `hive auth kilo-sync [--agent NAME]`
     // populates these directories.
     if agent.coding_agent == "kilo" {
-        let per_agent_kilo = std::path::Path::new(hive_dir).join(format!("kilocode-{}", agent.name));
+        let per_agent_kilo =
+            std::path::Path::new(hive_dir).join(format!("kilocode-{}", agent.name));
         let local_kilo = std::path::Path::new(hive_dir).join("kilocode");
         let global_kilo = std::path::Path::new(&home).join(".kilocode");
         if per_agent_kilo.exists() {
-            binds.push(format!("{}:/home/agent/.kilocode:ro", per_agent_kilo.display()));
+            binds.push(format!(
+                "{}:/home/agent/.kilocode:ro",
+                per_agent_kilo.display()
+            ));
         } else if local_kilo.exists() {
             binds.push(format!("{}:/home/agent/.kilocode:ro", local_kilo.display()));
         } else if global_kilo.exists() {
@@ -349,9 +412,11 @@ async fn create_agent_container(
 
     docker
         .create_container(
-            Some(bollard::query_parameters::CreateContainerOptionsBuilder::default()
-                .name(name)
-                .build()),
+            Some(
+                bollard::query_parameters::CreateContainerOptionsBuilder::default()
+                    .name(name)
+                    .build(),
+            ),
             body,
         )
         .await

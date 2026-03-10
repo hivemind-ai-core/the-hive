@@ -15,7 +15,12 @@ async fn untagged_agent_claims_any_task() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x01").await;
 
-    call(&mut ws, "task.create", json!({"title": "Tagged", "tags": ["rust"]})).await;
+    call(
+        &mut ws,
+        "task.create",
+        json!({"title": "Tagged", "tags": ["rust"]}),
+    )
+    .await;
 
     // No tag filter → gets any task.
     let res = call(&mut ws, "task.get_next", json!({})).await;
@@ -45,7 +50,12 @@ async fn tagged_task_not_claimed_by_different_tag_agent() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x03").await;
 
-    call(&mut ws, "task.create", json!({"title": "Python Only", "tags": ["python"]})).await;
+    call(
+        &mut ws,
+        "task.create",
+        json!({"title": "Python Only", "tags": ["python"]}),
+    )
+    .await;
 
     // Agent with "rust" tag should NOT claim a "python"-only task.
     let res = call(&mut ws, "task.get_next", json!({"tag": "rust"})).await;
@@ -78,10 +88,15 @@ async fn agent_reregister_resets_in_progress_tasks() {
     assert_eq!(res.result.unwrap().as_array().unwrap().len(), 2);
 
     // Re-register: resets both tasks to pending, then try_dispatch claims 1 (capacity=1).
-    let res = call(&mut ws, "agent.register", json!({
-        "id": "agent-x04",
-        "name": "Agent X04"
-    })).await;
+    let res = call(
+        &mut ws,
+        "agent.register",
+        json!({
+            "id": "agent-x04",
+            "name": "Agent X04"
+        }),
+    )
+    .await;
     assert!(res.error.is_none(), "register failed: {:?}", res.error);
 
     // After reset + re-dispatch: 1 pending, 1 in-progress.
@@ -105,10 +120,15 @@ async fn task_complete_stores_result_string() {
     let claim = call(&mut ws, "task.get_next", json!({})).await;
     let id = claim.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    call(&mut ws, "task.complete", json!({
-        "id": &id,
-        "result": "Output: success"
-    })).await;
+    call(
+        &mut ws,
+        "task.complete",
+        json!({
+            "id": &id,
+            "result": "Output: success"
+        }),
+    )
+    .await;
 
     let res = call(&mut ws, "task.get", json!({"id": &id})).await;
     let task = res.result.unwrap();
@@ -122,15 +142,34 @@ async fn task_complete_next_task_null_if_all_blocked() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x06").await;
 
-    let a = call(&mut ws, "task.create", json!({"title": "A"})).await.result.unwrap();
-    let b = call(&mut ws, "task.create", json!({"title": "B"})).await.result.unwrap();
-    let c = call(&mut ws, "task.create", json!({"title": "C"})).await.result.unwrap();
+    let a = call(&mut ws, "task.create", json!({"title": "A"}))
+        .await
+        .result
+        .unwrap();
+    let b = call(&mut ws, "task.create", json!({"title": "B"}))
+        .await
+        .result
+        .unwrap();
+    let c = call(&mut ws, "task.create", json!({"title": "C"}))
+        .await
+        .result
+        .unwrap();
     let b_id = b["id"].as_str().unwrap();
     let c_id = c["id"].as_str().unwrap();
 
     // B depends on A, C depends on B.
-    call(&mut ws, "task.set_dependency", json!({"task_id": b_id, "depends_on_id": a["id"].as_str().unwrap()})).await;
-    call(&mut ws, "task.set_dependency", json!({"task_id": c_id, "depends_on_id": b_id})).await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        json!({"task_id": b_id, "depends_on_id": a["id"].as_str().unwrap()}),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        json!({"task_id": c_id, "depends_on_id": b_id}),
+    )
+    .await;
 
     // Claim A.
     let claim = call(&mut ws, "task.get_next", json!({})).await;
@@ -153,8 +192,18 @@ async fn topic_list_new_since_zero_returns_all() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x07").await;
 
-    call(&mut ws, "topic.create", json!({"title": "T1", "content": "c"})).await;
-    call(&mut ws, "topic.create", json!({"title": "T2", "content": "c"})).await;
+    call(
+        &mut ws,
+        "topic.create",
+        json!({"title": "T1", "content": "c"}),
+    )
+    .await;
+    call(
+        &mut ws,
+        "topic.create",
+        json!({"title": "T2", "content": "c"}),
+    )
+    .await;
 
     let res = call(&mut ws, "topic.list_new", json!({"since": 0})).await;
     assert!(res.error.is_none());
@@ -168,7 +217,12 @@ async fn topic_list_new_future_since_returns_empty() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x08").await;
 
-    call(&mut ws, "topic.create", json!({"title": "Old", "content": "c"})).await;
+    call(
+        &mut ws,
+        "topic.create",
+        json!({"title": "Old", "content": "c"}),
+    )
+    .await;
 
     let far_future = 9_999_999_999i64;
     let res = call(&mut ws, "topic.list_new", json!({"since": far_future})).await;
@@ -185,18 +239,31 @@ async fn topic_wait_times_out_with_no_comments() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x09").await;
 
-    let res = call(&mut ws, "topic.create", json!({"title": "Waiting", "content": "c"})).await;
+    let res = call(
+        &mut ws,
+        "topic.create",
+        json!({"title": "Waiting", "content": "c"}),
+    )
+    .await;
     let topic_id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Wait 1 second with no comments — should time out.
-    let res = call(&mut ws, "topic.wait", json!({
-        "id": &topic_id,
-        "since_count": 0,
-        "timeout_secs": 1
-    })).await;
+    let res = call(
+        &mut ws,
+        "topic.wait",
+        json!({
+            "id": &topic_id,
+            "since_count": 0,
+            "timeout_secs": 1
+        }),
+    )
+    .await;
     assert!(res.error.is_some(), "topic.wait should error on timeout");
     let err_msg = res.error.unwrap().to_string();
-    assert!(err_msg.contains("timeout"), "error should mention timeout: {err_msg}");
+    assert!(
+        err_msg.contains("timeout"),
+        "error should mention timeout: {err_msg}"
+    );
 }
 
 // ── push.ack batch ────────────────────────────────────────────────────────────
@@ -208,10 +275,22 @@ async fn push_ack_batch_marks_all_delivered() {
     let mut ws_a = connect(addr, "agent-x10a").await;
 
     // Send two messages to B.
-    let r1 = call(&mut ws_a, "push.send", json!({"to_agent_id": "agent-x10b", "content": "msg1"}))
-        .await.result.unwrap();
-    let r2 = call(&mut ws_a, "push.send", json!({"to_agent_id": "agent-x10b", "content": "msg2"}))
-        .await.result.unwrap();
+    let r1 = call(
+        &mut ws_a,
+        "push.send",
+        json!({"to_agent_id": "agent-x10b", "content": "msg1"}),
+    )
+    .await
+    .result
+    .unwrap();
+    let r2 = call(
+        &mut ws_a,
+        "push.send",
+        json!({"to_agent_id": "agent-x10b", "content": "msg2"}),
+    )
+    .await
+    .result
+    .unwrap();
     let id1 = r1["id"].as_str().unwrap();
     let id2 = r2["id"].as_str().unwrap();
 
@@ -252,24 +331,38 @@ async fn mention_in_comment_sends_push_to_recipient() {
     let addr = start_server().await;
     let mut ws_a = connect(addr, "agent-x12a").await;
 
-    let res = call(&mut ws_a, "topic.create", json!({
-        "title": "Discussion",
-        "content": "Start"
-    })).await;
+    let res = call(
+        &mut ws_a,
+        "topic.create",
+        json!({
+            "title": "Discussion",
+            "content": "Start"
+        }),
+    )
+    .await;
     let topic_id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // A comments @mention of B.
-    call(&mut ws_a, "topic.comment", json!({
-        "topic_id": &topic_id,
-        "content": "Hey @agent-x12b check this out!"
-    })).await;
+    call(
+        &mut ws_a,
+        "topic.comment",
+        json!({
+            "topic_id": &topic_id,
+            "content": "Hey @agent-x12b check this out!"
+        }),
+    )
+    .await;
 
     // B connects and should find a push notification.
     let mut ws_b = connect(addr, "agent-x12b").await;
     let res = call(&mut ws_b, "push.list", json!({})).await;
     let msgs = res.result.unwrap();
     let msgs = msgs.as_array().unwrap();
-    assert_eq!(msgs.len(), 1, "mentioned agent should receive a push notification");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "mentioned agent should receive a push notification"
+    );
     assert!(
         msgs[0]["content"].as_str().unwrap().contains("tagged"),
         "notification should mention 'tagged': {}",
@@ -283,15 +376,25 @@ async fn self_mention_does_not_send_push() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x13").await;
 
-    let res = call(&mut ws, "topic.create", json!({"title": "T", "content": "c"})).await;
+    let res = call(
+        &mut ws,
+        "topic.create",
+        json!({"title": "T", "content": "c"}),
+    )
+    .await;
     let topic_id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Agent mentions itself — must include creator_agent_id for the server to detect the self-mention.
-    call(&mut ws, "topic.comment", json!({
-        "topic_id": &topic_id,
-        "content": "I am @agent-x13 and I'm talking to myself",
-        "creator_agent_id": "agent-x13"
-    })).await;
+    call(
+        &mut ws,
+        "topic.comment",
+        json!({
+            "topic_id": &topic_id,
+            "content": "I am @agent-x13 and I'm talking to myself",
+            "creator_agent_id": "agent-x13"
+        }),
+    )
+    .await;
 
     let res = call(&mut ws, "push.list", json!({})).await;
     assert!(
@@ -310,15 +413,35 @@ async fn task_list_status_and_tag_combined() {
 
     // "First Rust" is created first (lowest position) and will be claimed.
     // "Second Rust" remains pending. "Python Task" is never affected by rust-tag filter.
-    call(&mut ws, "task.create", json!({"title": "First Rust", "tags": ["rust"]})).await;
-    call(&mut ws, "task.create", json!({"title": "Python Task", "tags": ["python"]})).await;
-    call(&mut ws, "task.create", json!({"title": "Second Rust", "tags": ["rust"]})).await;
+    call(
+        &mut ws,
+        "task.create",
+        json!({"title": "First Rust", "tags": ["rust"]}),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.create",
+        json!({"title": "Python Task", "tags": ["python"]}),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.create",
+        json!({"title": "Second Rust", "tags": ["rust"]}),
+    )
+    .await;
 
     // Claim the first available rust task (= "First Rust").
     call(&mut ws, "task.get_next", json!({"tag": "rust"})).await;
 
     // Filter: pending + rust → only "Second Rust" remains pending.
-    let res = call(&mut ws, "task.list", json!({"status": "pending", "tag": "rust"})).await;
+    let res = call(
+        &mut ws,
+        "task.list",
+        json!({"status": "pending", "tag": "rust"}),
+    )
+    .await;
     let tasks = res.result.unwrap();
     let tasks = tasks.as_array().unwrap();
     assert_eq!(tasks.len(), 1);
@@ -338,7 +461,12 @@ async fn task_list_filter_by_assigned_agent() {
     call(&mut ws_a, "task.get_next", json!({})).await;
     call(&mut ws_b, "task.get_next", json!({})).await;
 
-    let res = call(&mut ws_a, "task.list", json!({"assigned_agent_id": "agent-x15a"})).await;
+    let res = call(
+        &mut ws_a,
+        "task.list",
+        json!({"assigned_agent_id": "agent-x15a"}),
+    )
+    .await;
     let tasks = res.result.unwrap();
     let tasks = tasks.as_array().unwrap();
     assert_eq!(tasks.len(), 1);
@@ -353,11 +481,26 @@ async fn topic_get_returns_topic_and_comments() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x16").await;
 
-    let res = call(&mut ws, "topic.create", json!({"title": "With Comments", "content": "body"})).await;
+    let res = call(
+        &mut ws,
+        "topic.create",
+        json!({"title": "With Comments", "content": "body"}),
+    )
+    .await;
     let topic_id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    call(&mut ws, "topic.comment", json!({"topic_id": &topic_id, "content": "Reply 1"})).await;
-    call(&mut ws, "topic.comment", json!({"topic_id": &topic_id, "content": "Reply 2"})).await;
+    call(
+        &mut ws,
+        "topic.comment",
+        json!({"topic_id": &topic_id, "content": "Reply 1"}),
+    )
+    .await;
+    call(
+        &mut ws,
+        "topic.comment",
+        json!({"topic_id": &topic_id, "content": "Reply 2"}),
+    )
+    .await;
 
     let res = call(&mut ws, "topic.get", json!({"id": &topic_id})).await;
     assert!(res.error.is_none());
@@ -387,7 +530,12 @@ async fn agent_list_shows_registered_agents() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x18").await;
 
-    call(&mut ws, "agent.register", json!({"id": "agent-x18", "name": "X18 Agent"})).await;
+    call(
+        &mut ws,
+        "agent.register",
+        json!({"id": "agent-x18", "name": "X18 Agent"}),
+    )
+    .await;
 
     let res = call(&mut ws, "agent.list", json!({})).await;
     assert!(res.error.is_none());
@@ -419,22 +567,43 @@ async fn tasks_dispatched_in_dependency_order() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-x20").await;
 
-    let a = call(&mut ws, "task.create", json!({"title": "Step A"})).await.result.unwrap();
-    let b = call(&mut ws, "task.create", json!({"title": "Step B"})).await.result.unwrap();
+    let a = call(&mut ws, "task.create", json!({"title": "Step A"}))
+        .await
+        .result
+        .unwrap();
+    let b = call(&mut ws, "task.create", json!({"title": "Step B"}))
+        .await
+        .result
+        .unwrap();
     let a_id = a["id"].as_str().unwrap();
     let b_id = b["id"].as_str().unwrap();
 
-    call(&mut ws, "task.set_dependency", json!({"task_id": b_id, "depends_on_id": a_id})).await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        json!({"task_id": b_id, "depends_on_id": a_id}),
+    )
+    .await;
 
     // Must get A first.
-    let first = call(&mut ws, "task.get_next", json!({})).await.result.unwrap();
+    let first = call(&mut ws, "task.get_next", json!({}))
+        .await
+        .result
+        .unwrap();
     assert_eq!(first["id"].as_str().unwrap(), a_id, "should get A first");
 
     // Complete A — the complete response auto-claims the next available task (B).
     let complete_res = call(&mut ws, "task.complete", json!({"id": a_id})).await;
-    assert!(complete_res.error.is_none(), "complete failed: {:?}", complete_res.error);
+    assert!(
+        complete_res.error.is_none(),
+        "complete failed: {:?}",
+        complete_res.error
+    );
     let r = complete_res.result.unwrap();
     let next = &r["next_task"];
-    assert!(!next.is_null(), "next_task should be B after A is completed");
+    assert!(
+        !next.is_null(),
+        "next_task should be B after A is completed"
+    );
     assert_eq!(next["id"].as_str().unwrap(), b_id, "next_task should be B");
 }

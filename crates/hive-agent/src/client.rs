@@ -8,7 +8,10 @@ use std::{
 
 use futures_util::{SinkExt, StreamExt};
 use hive_core::types::{ApiMessage, MessageType};
-use tokio::sync::{mpsc::{self, UnboundedReceiver, UnboundedSender}, oneshot};
+use tokio::sync::{
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -40,7 +43,11 @@ pub fn start(
     agent_id: String,
     agent_name: String,
     agent_tags: Vec<String>,
-) -> (UnboundedSender<ClientCmd>, PendingRequests, UnboundedReceiver<ApiMessage>) {
+) -> (
+    UnboundedSender<ClientCmd>,
+    PendingRequests,
+    UnboundedReceiver<ApiMessage>,
+) {
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<ClientCmd>();
     let (push_tx, push_rx) = mpsc::unbounded_channel::<ApiMessage>();
     let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
@@ -125,16 +132,14 @@ async fn run_loop(
                             recv_task.abort();
                             return;
                         }
-                        Some(ClientCmd::Send(msg)) => {
-                            match serde_json::to_string(&msg) {
-                                Ok(json) => {
-                                    if sink.send(Message::text(json)).await.is_err() {
-                                        break;
-                                    }
+                        Some(ClientCmd::Send(msg)) => match serde_json::to_string(&msg) {
+                            Ok(json) => {
+                                if sink.send(Message::text(json)).await.is_err() {
+                                    break;
                                 }
-                                Err(e) => warn!("Serialize error: {e}"),
                             }
-                        }
+                            Err(e) => warn!("Serialize error: {e}"),
+                        },
                     }
 
                     if recv_task.is_finished() {
@@ -290,7 +295,10 @@ mod tests {
             method: None,
             params: None,
             result: None,
-            error: Some(hive_core::types::ApiError { code: 500, message: "boom".to_string() }),
+            error: Some(hive_core::types::ApiError {
+                code: 500,
+                message: "boom".to_string(),
+            }),
         };
 
         route_message(error, &pending, &push_tx);

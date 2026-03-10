@@ -20,17 +20,29 @@ pub struct TestRequest {
 }
 
 pub async fn start(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
-    let cmd = cfg.commands.get("start").cloned().unwrap_or_else(|| "npm run dev".to_string());
+    let cmd = cfg
+        .commands
+        .get("start")
+        .cloned()
+        .unwrap_or_else(|| "npm run dev".to_string());
     Json(run_command(&cmd).await)
 }
 
 pub async fn stop(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
-    let cmd = cfg.commands.get("stop").cloned().unwrap_or_else(|| "npm run stop".to_string());
+    let cmd = cfg
+        .commands
+        .get("stop")
+        .cloned()
+        .unwrap_or_else(|| "npm run stop".to_string());
     Json(run_command(&cmd).await)
 }
 
 pub async fn restart(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
-    let cmd = cfg.commands.get("restart").cloned().unwrap_or_else(|| "npm run restart".to_string());
+    let cmd = cfg
+        .commands
+        .get("restart")
+        .cloned()
+        .unwrap_or_else(|| "npm run restart".to_string());
     Json(run_command(&cmd).await)
 }
 
@@ -38,7 +50,11 @@ pub async fn test(
     State(cfg): State<ExecConfig>,
     body: Option<Json<TestRequest>>,
 ) -> Json<CommandResponse> {
-    let base = cfg.commands.get("test").cloned().unwrap_or_else(|| "npm test".to_string());
+    let base = cfg
+        .commands
+        .get("test")
+        .cloned()
+        .unwrap_or_else(|| "npm test".to_string());
     let pattern = body.and_then(|b| b.0.pattern).unwrap_or_default();
     let cmd = if pattern.is_empty() {
         base
@@ -49,12 +65,20 @@ pub async fn test(
 }
 
 pub async fn check(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
-    let cmd = cfg.commands.get("check").cloned().unwrap_or_else(|| "npm run check".to_string());
+    let cmd = cfg
+        .commands
+        .get("check")
+        .cloned()
+        .unwrap_or_else(|| "npm run check".to_string());
     Json(run_command(&cmd).await)
 }
 
 pub async fn logs(State(cfg): State<ExecConfig>) -> Json<CommandResponse> {
-    let cmd = cfg.commands.get("logs").cloned().unwrap_or_else(|| "npm run logs".to_string());
+    let cmd = cfg
+        .commands
+        .get("logs")
+        .cloned()
+        .unwrap_or_else(|| "npm run logs".to_string());
     Json(run_command(&cmd).await)
 }
 

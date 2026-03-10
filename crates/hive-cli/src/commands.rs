@@ -8,8 +8,8 @@ use bollard::Docker;
 use tokio::process::Command;
 use tracing::info;
 
+use crate::config::io::{default_path, hive_dir};
 use crate::config::{self, Config};
-use crate::config::io::{hive_dir, default_path};
 use crate::docker::{containers, lifecycle, network};
 
 fn connect_docker() -> Result<Docker> {
@@ -37,8 +37,8 @@ async fn ensure_images(docker: &Docker, cfg: &Config, project_dir: &Path) -> Res
 
     let builds = [
         (containers::server_image(id), "Dockerfile.server", "server"),
-        (containers::agent_image(id),  "Dockerfile.agent",  "agent"),
-        (containers::app_image(id),    "Dockerfile.app",    "app"),
+        (containers::agent_image(id), "Dockerfile.agent", "agent"),
+        (containers::app_image(id), "Dockerfile.app", "app"),
     ];
 
     for (image, dockerfile, label) in &builds {
@@ -115,9 +115,9 @@ pub async fn start(project_dir: &Path) -> Result<()> {
 
     // Connect server to the agent network so agents can reach it by container name.
     // Ignores "already connected" errors (container may have been created on a prior start).
-    if let Err(e) = containers::connect_to_network(
-        &docker, &server, &network::agent_network_name(id),
-    ).await {
+    if let Err(e) =
+        containers::connect_to_network(&docker, &server, &network::agent_network_name(id)).await
+    {
         if !format!("{e:#}").contains("already exists") {
             return Err(e);
         }
@@ -145,12 +145,15 @@ pub async fn stop(project_dir: &Path, remove: bool) -> Result<()> {
     let id = &cfg.project_id;
 
     // Build the set of known agent container names.
-    let known: Vec<String> = cfg.agents.iter()
+    let known: Vec<String> = cfg
+        .agents
+        .iter()
         .map(|a| containers::agent_name(id, &a.name))
         .collect();
 
     // Find agent containers that are no longer in the config (orphans).
-    let orphans = containers::orphaned_agent_names(&docker, id, &known).await
+    let orphans = containers::orphaned_agent_names(&docker, id, &known)
+        .await
         .unwrap_or_default();
 
     for agent in cfg.agents.iter().rev() {
@@ -197,7 +200,11 @@ fn sync_bins(project_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(&bin_dst).context("creating .hive/bin/")?;
     for name in &["hive-server", "hive-agent", "app-daemon"] {
         let src = crate::install::container_binary(name);
-        anyhow::ensure!(src.exists(), "{} not found — run 'just install' first", src.display());
+        anyhow::ensure!(
+            src.exists(),
+            "{} not found — run 'just install' first",
+            src.display()
+        );
         let dst = bin_dst.join(name);
         std::fs::copy(&src, &dst).with_context(|| format!("syncing {name} to .hive/bin/"))?;
         std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o755))
@@ -216,23 +223,47 @@ pub async fn rebuild(project_dir: &Path, target: &str) -> Result<()> {
     sync_bins(project_dir)?;
 
     let all = [
-        ("server", "Dockerfile.server", containers::server_image(id), containers::server_name(id)),
-        ("agent",  "Dockerfile.agent",  containers::agent_image(id),  String::new()), // image-only target
-        ("app",    "Dockerfile.app",    containers::app_image(id),    containers::app_name(id)),
+        (
+            "server",
+            "Dockerfile.server",
+            containers::server_image(id),
+            containers::server_name(id),
+        ),
+        (
+            "agent",
+            "Dockerfile.agent",
+            containers::agent_image(id),
+            String::new(),
+        ), // image-only target
+        (
+            "app",
+            "Dockerfile.app",
+            containers::app_image(id),
+            containers::app_name(id),
+        ),
     ];
 
     let builds: Vec<_> = if target == "all" {
         all.iter().collect()
     } else {
-        all.iter().filter(|(name, _, _, _)| *name == target).collect()
+        all.iter()
+            .filter(|(name, _, _, _)| *name == target)
+            .collect()
     };
 
-    anyhow::ensure!(!builds.is_empty(), "Unknown target '{target}'. Use: server, agent, app, all");
+    anyhow::ensure!(
+        !builds.is_empty(),
+        "Unknown target '{target}'. Use: server, agent, app, all"
+    );
 
     // Build new images.
     for (name, dockerfile, tag, _) in &builds {
         let dockerfile_path = hive.join(dockerfile);
-        anyhow::ensure!(dockerfile_path.exists(), "Dockerfile not found: {}", dockerfile_path.display());
+        anyhow::ensure!(
+            dockerfile_path.exists(),
+            "Dockerfile not found: {}",
+            dockerfile_path.display()
+        );
 
         println!("Building {name} → {tag}");
         let status = Command::new("docker")
@@ -251,8 +282,8 @@ pub async fn rebuild(project_dir: &Path, target: &str) -> Result<()> {
     for (name, _, _, _) in &builds {
         match *name {
             "server" => lifecycle::remove(&docker, &containers::server_name(id)).await?,
-            "app"    => lifecycle::remove(&docker, &containers::app_name(id)).await?,
-            "agent"  => {
+            "app" => lifecycle::remove(&docker, &containers::app_name(id)).await?,
+            "agent" => {
                 for agent in cfg.agents.iter().rev() {
                     lifecycle::remove(&docker, &containers::agent_name(id, &agent.name)).await?;
                 }
@@ -285,7 +316,8 @@ pub async fn status(project_dir: &Path) -> Result<()> {
                 let status = info
                     .state
                     .as_ref()
-                    .and_then(|s| s.status.as_ref()).map_or_else(|| "unknown".to_string(), |s| format!("{s:?}"));
+                    .and_then(|s| s.status.as_ref())
+                    .map_or_else(|| "unknown".to_string(), |s| format!("{s:?}"));
                 let cid = info.id.as_deref().unwrap_or("-");
                 println!("{:<35} {:<15} {}", name, status, &cid[..8.min(cid.len())]);
             }
@@ -331,12 +363,18 @@ pub fn auth_set_key(project_dir: &Path, key: &str, value: &str, agent: Option<&s
     anyhow::ensure!(!key.is_empty(), "key must not be empty");
     anyhow::ensure!(!value.is_empty(), "value must not be empty");
 
-    let masked = if value.len() > 8 { format!("{}***", &value[..8]) } else { "***".to_string() };
+    let masked = if value.len() > 8 {
+        format!("{}***", &value[..8])
+    } else {
+        "***".to_string()
+    };
 
     if let Some(name) = agent {
         let config_path = default_path(project_dir);
         let mut cfg = config::load(&config_path)?;
-        let agent = cfg.agents.iter_mut()
+        let agent = cfg
+            .agents
+            .iter_mut()
             .find(|a| a.name == name)
             .ok_or_else(|| anyhow::anyhow!("agent '{}' not found in config", name))?;
         agent.env.insert(key.to_string(), value.to_string());
@@ -355,14 +393,21 @@ pub fn auth_set_key(project_dir: &Path, key: &str, value: &str, agent: Option<&s
 ///
 /// Without `--agent`: writes to `.hive/.env` (shared across all agents).
 /// With `--agent NAME`: writes to that agent's `env:` block in `config.toml`.
-pub fn auth_set_endpoint(project_dir: &Path, key: &str, url: &str, agent: Option<&str>) -> Result<()> {
+pub fn auth_set_endpoint(
+    project_dir: &Path,
+    key: &str,
+    url: &str,
+    agent: Option<&str>,
+) -> Result<()> {
     anyhow::ensure!(!key.is_empty(), "key must not be empty");
     anyhow::ensure!(!url.is_empty(), "url must not be empty");
 
     if let Some(name) = agent {
         let config_path = default_path(project_dir);
         let mut cfg = config::load(&config_path)?;
-        let agent = cfg.agents.iter_mut()
+        let agent = cfg
+            .agents
+            .iter_mut()
             .find(|a| a.name == name)
             .ok_or_else(|| anyhow::anyhow!("agent '{}' not found in config", name))?;
         agent.env.insert(key.to_string(), url.to_string());
@@ -457,7 +502,10 @@ fn warn_missing_credentials(cfg: &Config, project_dir: &Path) {
 
         if missing {
             println!();
-            println!("⚠  Agent '{}' has no credentials. Set an API key:", agent.name);
+            println!(
+                "⚠  Agent '{}' has no credentials. Set an API key:",
+                agent.name
+            );
             println!("     hive auth set-key ANTHROPIC_API_KEY sk-ant-...");
         }
     }
@@ -516,12 +564,21 @@ pub fn auth_status(project_dir: &Path) -> Result<()> {
         println!("Agent '{}' ({})", agent.name, agent.coding_agent);
         match agent.coding_agent.as_str() {
             "claude" => {
-                let host_ok  = check("~/.claude.json (host login)", claude_json_host.exists());
-                let hive_ok  = check(".hive/claude.json (synced creds)", claude_json_hive.exists());
-                let dir_ok   = check("~/.claude/ (settings dir)", claude_dir_host.exists());
-                let creds_host_ok = check("~/.claude/.credentials.json (OAuth creds)", claude_dir_host.join(".credentials.json").exists());
-                let creds_hive_ok = check(".hive/claude-credentials.json (synced OAuth creds)", hive.join("claude-credentials.json").exists());
-                let key_ok   = dotenv_keys.iter().any(|l| l.contains("ANTHROPIC_API_KEY"));
+                let host_ok = check("~/.claude.json (host login)", claude_json_host.exists());
+                let hive_ok = check(
+                    ".hive/claude.json (synced creds)",
+                    claude_json_hive.exists(),
+                );
+                let dir_ok = check("~/.claude/ (settings dir)", claude_dir_host.exists());
+                let creds_host_ok = check(
+                    "~/.claude/.credentials.json (OAuth creds)",
+                    claude_dir_host.join(".credentials.json").exists(),
+                );
+                let creds_hive_ok = check(
+                    ".hive/claude-credentials.json (synced OAuth creds)",
+                    hive.join("claude-credentials.json").exists(),
+                );
+                let key_ok = dotenv_keys.iter().any(|l| l.contains("ANTHROPIC_API_KEY"));
                 let _key_msg = check(".hive/.env ANTHROPIC_API_KEY", key_ok);
 
                 if !host_ok && !hive_ok && !key_ok {
@@ -533,9 +590,10 @@ pub fn auth_status(project_dir: &Path) -> Result<()> {
                 let _ = (dir_ok, creds_host_ok, creds_hive_ok);
             }
             "kilo" => {
-                let dir_ok  = check("~/.kilocode/ (kilo settings)", kilocode_dir_host.exists());
-                let key_ok  = dotenv_keys.iter().any(|l| {
-                    l.contains("ANTHROPIC_API_KEY") || l.contains("OPENAI_API_KEY")
+                let dir_ok = check("~/.kilocode/ (kilo settings)", kilocode_dir_host.exists());
+                let key_ok = dotenv_keys.iter().any(|l| {
+                    l.contains("ANTHROPIC_API_KEY")
+                        || l.contains("OPENAI_API_KEY")
                         || l.contains("GOOGLE_API_KEY")
                 });
                 let _key_msg = check(".hive/.env API key (ANTHROPIC/OPENAI/GOOGLE)", key_ok);
@@ -565,8 +623,8 @@ fn check(label: &str, present: bool) -> bool {
 
 /// `hive auth sync` — copy ~/.claude.json and ~/.claude/.credentials.json to .hive/ for use in agent containers.
 pub fn auth_sync(project_dir: &Path) -> Result<()> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
     let hive = hive_dir(project_dir);
 
     let config_src = home.join(".claude.json");
@@ -587,10 +645,13 @@ pub fn auth_sync(project_dir: &Path) -> Result<()> {
 
     if creds_src.exists() {
         let dst = hive.join("claude-credentials.json");
-        std::fs::copy(&creds_src, &dst).context("copying ~/.claude/.credentials.json to .hive/claude-credentials.json")?;
+        std::fs::copy(&creds_src, &dst)
+            .context("copying ~/.claude/.credentials.json to .hive/claude-credentials.json")?;
         println!("Copied ~/.claude/.credentials.json → .hive/claude-credentials.json");
     } else {
-        println!("Note: ~/.claude/.credentials.json not found (OAuth credentials may not be set up).");
+        println!(
+            "Note: ~/.claude/.credentials.json not found (OAuth credentials may not be set up)."
+        );
     }
 
     println!("Files will be auto-mounted in claude agent containers.");
@@ -616,10 +677,10 @@ pub fn auth_kilo_sync(project_dir: &Path, agent: Option<&str>) -> Result<()> {
         );
     }
 
-    let raw = std::fs::read_to_string(&src_config)
-        .context("reading ~/.kilocode/cli/config.json")?;
-    let json: serde_json::Value = serde_json::from_str(&raw)
-        .context("parsing ~/.kilocode/cli/config.json")?;
+    let raw =
+        std::fs::read_to_string(&src_config).context("reading ~/.kilocode/cli/config.json")?;
+    let json: serde_json::Value =
+        serde_json::from_str(&raw).context("parsing ~/.kilocode/cli/config.json")?;
 
     let providers: Vec<(usize, String)> = json["providers"]
         .as_array()
@@ -660,7 +721,10 @@ pub fn auth_kilo_sync(project_dir: &Path, agent: Option<&str>) -> Result<()> {
     // Build the minimal provider object with id renamed to "default".
     let mut provider = json["providers"][*arr_idx].clone();
     if let Some(obj) = provider.as_object_mut() {
-        obj.insert("id".to_string(), serde_json::Value::String("default".to_string()));
+        obj.insert(
+            "id".to_string(),
+            serde_json::Value::String("default".to_string()),
+        );
     }
 
     let out = serde_json::json!({
@@ -673,8 +737,7 @@ pub fn auth_kilo_sync(project_dir: &Path, agent: Option<&str>) -> Result<()> {
         None => "kilocode".to_string(),
     };
     let dst_dir = hive_dir(project_dir).join(&dst_name).join("cli");
-    std::fs::create_dir_all(&dst_dir)
-        .with_context(|| format!("creating .hive/{dst_name}/cli/"))?;
+    std::fs::create_dir_all(&dst_dir).with_context(|| format!("creating .hive/{dst_name}/cli/"))?;
     std::fs::write(
         dst_dir.join("config.json"),
         serde_json::to_string_pretty(&out)?,
@@ -691,20 +754,26 @@ pub fn auth_kilo_sync(project_dir: &Path, agent: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-
 /// `hive auth login [--email]` — run `claude auth login` inside the first agent container,
 /// stream the URL to stdout, and copy the resulting credentials to .hive/claude.json.
 pub async fn auth_login(project_dir: &Path, email: Option<&str>) -> Result<()> {
     let cfg = load_config(project_dir)?;
     let id = &cfg.project_id;
-    let agent = cfg.agents.first()
+    let agent = cfg
+        .agents
+        .first()
         .ok_or_else(|| anyhow::anyhow!("No agents configured in .hive/config.toml"))?;
     let container = containers::agent_name(id, &agent.name);
 
     println!("Running 'claude auth login' in container '{container}'…");
 
     let mut cmd = std::process::Command::new("docker");
-    cmd.arg("exec").arg("-i").arg(&container).arg("claude").arg("auth").arg("login");
+    cmd.arg("exec")
+        .arg("-i")
+        .arg(&container)
+        .arg("claude")
+        .arg("auth")
+        .arg("login");
     if let Some(email) = email {
         cmd.arg("--email").arg(email);
     }
@@ -780,7 +849,8 @@ pub async fn logs(project_dir: &Path, container: &str, follow: bool) -> Result<(
         // Resolve short alias to full name, or use as-is for explicit container names.
         let full = all_targets
             .iter()
-            .find(|(alias, _)| alias == container).map_or_else(|| container.to_string(), |(_, full)| full.clone());
+            .find(|(alias, _)| alias == container)
+            .map_or_else(|| container.to_string(), |(_, full)| full.clone());
         vec![(container.to_string(), full)]
     };
 

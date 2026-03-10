@@ -8,11 +8,11 @@ pub mod review;
 pub mod server;
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 
 use super::state::{ConfigWizardState, WizardScreen};
@@ -23,7 +23,9 @@ pub fn render_header(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
         .iter()
         .flat_map(|&s| {
             let style = if s == state.screen {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else if s.index() < state.screen.index() {
                 Style::default().fg(Color::Green)
             } else {
@@ -42,7 +44,10 @@ pub fn render_footer(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
     } else {
         "j/k:move  Enter:edit  l/→:next  h/←:prev  q:cancel"
     };
-    f.render_widget(Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)), area);
+    f.render_widget(
+        Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
+        area,
+    );
 }
 
 /// Render a single form field row.
@@ -60,12 +65,16 @@ pub fn render_field<'a>(
 ) -> Line<'a> {
     let (prefix_style, value_style) = if editing {
         (
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
             Style::default().fg(Color::Yellow),
         )
     } else if focused {
         (
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
             Style::default().fg(Color::White),
         )
     } else {
@@ -83,7 +92,10 @@ pub fn render_field<'a>(
     };
 
     Line::from(vec![
-        Span::styled(format!("{marker}{label:<22}", marker = marker, label = label), prefix_style),
+        Span::styled(
+            format!("{marker}{label:<22}", marker = marker, label = label),
+            prefix_style,
+        ),
         Span::styled(value, value_style),
     ])
 }

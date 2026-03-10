@@ -16,10 +16,15 @@ async fn push_send_visible_in_list() {
     let mut ws_a = connect(addr, "agent-23a").await;
 
     // A sends to B while B is not connected → stored undelivered
-    let res = call(&mut ws_a, "push.send", json!({
-        "to_agent_id": "agent-23b",
-        "content": "Hello B!"
-    })).await;
+    let res = call(
+        &mut ws_a,
+        "push.send",
+        json!({
+            "to_agent_id": "agent-23b",
+            "content": "Hello B!"
+        }),
+    )
+    .await;
     assert!(res.error.is_none(), "push.send failed: {:?}", res.error);
 
     // B connects and lists messages
@@ -39,10 +44,15 @@ async fn push_ack_removes_from_list() {
     let addr = start_server().await;
     let mut ws_a = connect(addr, "agent-24a").await;
 
-    let res = call(&mut ws_a, "push.send", json!({
-        "to_agent_id": "agent-24b",
-        "content": "Ack me!"
-    })).await;
+    let res = call(
+        &mut ws_a,
+        "push.send",
+        json!({
+            "to_agent_id": "agent-24b",
+            "content": "Ack me!"
+        }),
+    )
+    .await;
     assert!(res.error.is_none());
     let msg_id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
@@ -70,10 +80,15 @@ async fn push_list_scoped_to_recipient() {
     let mut ws_a = connect(addr, "agent-25a").await;
 
     // A sends to B (B not connected)
-    call(&mut ws_a, "push.send", json!({
-        "to_agent_id": "agent-25b",
-        "content": "For B only"
-    })).await;
+    call(
+        &mut ws_a,
+        "push.send",
+        json!({
+            "to_agent_id": "agent-25b",
+            "content": "For B only"
+        }),
+    )
+    .await;
 
     // C connects and checks — should see nothing
     let mut ws_c = connect(addr, "agent-25c").await;

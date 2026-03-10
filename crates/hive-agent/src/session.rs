@@ -61,29 +61,44 @@ mod tests {
 
     #[test]
     fn test_kilo_format() {
-        assert_eq!(extract_from_output("Session: abc123\nsome other output"), Some("abc123".to_string()));
+        assert_eq!(
+            extract_from_output("Session: abc123\nsome other output"),
+            Some("abc123".to_string())
+        );
     }
 
     #[test]
     fn test_claude_plain_text_format() {
-        assert_eq!(extract_from_output("Session ID: xyz-789"), Some("xyz-789".to_string()));
+        assert_eq!(
+            extract_from_output("Session ID: xyz-789"),
+            Some("xyz-789".to_string())
+        );
     }
 
     #[test]
     fn test_old_format() {
-        assert_eq!(extract_from_output("session-id: old-format-id"), Some("old-format-id".to_string()));
+        assert_eq!(
+            extract_from_output("session-id: old-format-id"),
+            Some("old-format-id".to_string())
+        );
     }
 
     #[test]
     fn test_json_stream_session_id_field() {
         let output = r#"{"sessionId":"json-session-1","type":"result"}"#;
-        assert_eq!(extract_from_output(output), Some("json-session-1".to_string()));
+        assert_eq!(
+            extract_from_output(output),
+            Some("json-session-1".to_string())
+        );
     }
 
     #[test]
     fn test_json_stream_snake_case_variant() {
         let output = r#"{"session_id":"json-session-2"}"#;
-        assert_eq!(extract_from_output(output), Some("json-session-2".to_string()));
+        assert_eq!(
+            extract_from_output(output),
+            Some("json-session-2".to_string())
+        );
     }
 
     #[test]
@@ -101,7 +116,10 @@ mod tests {
 
     #[test]
     fn test_no_session_returns_none() {
-        assert_eq!(extract_from_output("No session here\nJust some output"), None);
+        assert_eq!(
+            extract_from_output("No session here\nJust some output"),
+            None
+        );
     }
 
     #[test]
@@ -163,7 +181,10 @@ mod tests {
     #[test]
     fn test_json_snake_case_last_one_wins() {
         let output = "{\"session_id\":\"snake-first\"}\n{\"session_id\":\"snake-second\"}";
-        assert_eq!(extract_from_output(output), Some("snake-second".to_string()));
+        assert_eq!(
+            extract_from_output(output),
+            Some("snake-second".to_string())
+        );
     }
 
     #[test]
@@ -213,7 +234,8 @@ pub fn extract_from_output(output: &str) -> Option<String> {
         // JSON stream pattern — try to parse each line as JSON.
         if line.starts_with('{') {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                let id = v.get("sessionId")
+                let id = v
+                    .get("sessionId")
                     .or_else(|| v.get("session_id"))
                     .and_then(|v| v.as_str())
                     .map(str::to_string);
@@ -226,4 +248,3 @@ pub fn extract_from_output(output: &str) -> Option<String> {
 
     last_json_id
 }
-

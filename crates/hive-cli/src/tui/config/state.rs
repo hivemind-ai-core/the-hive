@@ -26,45 +26,45 @@ impl WizardScreen {
 
     pub fn next(self) -> Self {
         match self {
-            Self::Server  => Self::Agents,
-            Self::Agents  => Self::App,
-            Self::App     => Self::Exec,
-            Self::Exec    => Self::Logging,
+            Self::Server => Self::Agents,
+            Self::Agents => Self::App,
+            Self::App => Self::Exec,
+            Self::Exec => Self::Logging,
             Self::Logging => Self::Review,
-            Self::Review  => Self::Review,
+            Self::Review => Self::Review,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Server  => Self::Server,
-            Self::Agents  => Self::Server,
-            Self::App     => Self::Agents,
-            Self::Exec    => Self::App,
+            Self::Server => Self::Server,
+            Self::Agents => Self::Server,
+            Self::App => Self::Agents,
+            Self::Exec => Self::App,
             Self::Logging => Self::Exec,
-            Self::Review  => Self::Logging,
+            Self::Review => Self::Logging,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Server  => "Server",
-            Self::Agents  => "Agents",
-            Self::App     => "App",
-            Self::Exec    => "Exec",
+            Self::Server => "Server",
+            Self::Agents => "Agents",
+            Self::App => "App",
+            Self::Exec => "Exec",
             Self::Logging => "Logging",
-            Self::Review  => "Review",
+            Self::Review => "Review",
         }
     }
 
     pub fn index(self) -> usize {
         match self {
-            Self::Server  => 0,
-            Self::Agents  => 1,
-            Self::App     => 2,
-            Self::Exec    => 3,
+            Self::Server => 0,
+            Self::Agents => 1,
+            Self::App => 2,
+            Self::Exec => 3,
             Self::Logging => 4,
-            Self::Review  => 5,
+            Self::Review => 5,
         }
     }
 }

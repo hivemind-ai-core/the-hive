@@ -8,17 +8,17 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::{
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
-    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Clear, Paragraph},
+    Frame, Terminal,
 };
 
-use super::events::{Action, next_action};
+use super::events::{next_action, Action};
 use super::poller::{self, TuiCmd};
 use super::state::AppState;
 use crate::config::Config;
@@ -116,7 +116,9 @@ impl App {
         // Task edit dialog.
         if let Some(ref mut dialog) = self.task_edit_dialog {
             match action {
-                Action::Back => { self.task_edit_dialog = None; }
+                Action::Back => {
+                    self.task_edit_dialog = None;
+                }
                 Action::Tab => {
                     dialog.active_field = match dialog.active_field {
                         TaskDialogField::Title => TaskDialogField::Description,
@@ -124,24 +126,27 @@ impl App {
                         TaskDialogField::Tags => TaskDialogField::Title,
                     };
                 }
-                Action::Char(c) => {
-                    match dialog.active_field {
-                        TaskDialogField::Title => dialog.title.push(c),
-                        TaskDialogField::Description => dialog.description.push(c),
-                        TaskDialogField::Tags => dialog.tags.push(c),
+                Action::Char(c) => match dialog.active_field {
+                    TaskDialogField::Title => dialog.title.push(c),
+                    TaskDialogField::Description => dialog.description.push(c),
+                    TaskDialogField::Tags => dialog.tags.push(c),
+                },
+                Action::Backspace => match dialog.active_field {
+                    TaskDialogField::Title => {
+                        dialog.title.pop();
                     }
-                }
-                Action::Backspace => {
-                    match dialog.active_field {
-                        TaskDialogField::Title => { dialog.title.pop(); }
-                        TaskDialogField::Description => { dialog.description.pop(); }
-                        TaskDialogField::Tags => { dialog.tags.pop(); }
+                    TaskDialogField::Description => {
+                        dialog.description.pop();
                     }
-                }
+                    TaskDialogField::Tags => {
+                        dialog.tags.pop();
+                    }
+                },
                 Action::Select => {
                     if !dialog.title.trim().is_empty() {
                         if let Some(ref tx) = self.cmd_tx {
-                            let tags: Vec<String> = dialog.tags
+                            let tags: Vec<String> = dialog
+                                .tags
                                 .split(',')
                                 .map(|s| s.trim().to_string())
                                 .filter(|s| !s.is_empty())
@@ -164,9 +169,15 @@ impl App {
         // Comment creation dialog.
         if let Some(ref mut dialog) = self.comment_dialog {
             match action {
-                Action::Back => { self.comment_dialog = None; }
-                Action::Char(c) => { dialog.content.push(c); }
-                Action::Backspace => { dialog.content.pop(); }
+                Action::Back => {
+                    self.comment_dialog = None;
+                }
+                Action::Char(c) => {
+                    dialog.content.push(c);
+                }
+                Action::Backspace => {
+                    dialog.content.pop();
+                }
                 Action::Select => {
                     if !dialog.content.trim().is_empty() {
                         if let Some(ref tx) = self.cmd_tx {
@@ -186,7 +197,9 @@ impl App {
         // Task creation dialog.
         if let Some(ref mut dialog) = self.task_dialog {
             match action {
-                Action::Back => { self.task_dialog = None; }
+                Action::Back => {
+                    self.task_dialog = None;
+                }
                 Action::Tab => {
                     dialog.active_field = match dialog.active_field {
                         TaskDialogField::Title => TaskDialogField::Description,
@@ -194,24 +207,27 @@ impl App {
                         TaskDialogField::Tags => TaskDialogField::Title,
                     };
                 }
-                Action::Char(c) => {
-                    match dialog.active_field {
-                        TaskDialogField::Title => dialog.title.push(c),
-                        TaskDialogField::Description => dialog.description.push(c),
-                        TaskDialogField::Tags => dialog.tags.push(c),
+                Action::Char(c) => match dialog.active_field {
+                    TaskDialogField::Title => dialog.title.push(c),
+                    TaskDialogField::Description => dialog.description.push(c),
+                    TaskDialogField::Tags => dialog.tags.push(c),
+                },
+                Action::Backspace => match dialog.active_field {
+                    TaskDialogField::Title => {
+                        dialog.title.pop();
                     }
-                }
-                Action::Backspace => {
-                    match dialog.active_field {
-                        TaskDialogField::Title => { dialog.title.pop(); }
-                        TaskDialogField::Description => { dialog.description.pop(); }
-                        TaskDialogField::Tags => { dialog.tags.pop(); }
+                    TaskDialogField::Description => {
+                        dialog.description.pop();
                     }
-                }
+                    TaskDialogField::Tags => {
+                        dialog.tags.pop();
+                    }
+                },
                 Action::Select => {
                     if !dialog.title.trim().is_empty() {
                         if let Some(ref tx) = self.cmd_tx {
-                            let tags: Vec<String> = dialog.tags
+                            let tags: Vec<String> = dialog
+                                .tags
                                 .split(',')
                                 .map(|s| s.trim().to_string())
                                 .filter(|s| !s.is_empty())
@@ -233,25 +249,27 @@ impl App {
         // Topic creation dialog.
         if let Some(ref mut dialog) = self.topic_dialog {
             match action {
-                Action::Back => { self.topic_dialog = None; }
+                Action::Back => {
+                    self.topic_dialog = None;
+                }
                 Action::Tab => {
                     dialog.active_field = match dialog.active_field {
                         TopicDialogField::Title => TopicDialogField::Content,
                         TopicDialogField::Content => TopicDialogField::Title,
                     };
                 }
-                Action::Char(c) => {
-                    match dialog.active_field {
-                        TopicDialogField::Title => dialog.title.push(c),
-                        TopicDialogField::Content => dialog.content.push(c),
+                Action::Char(c) => match dialog.active_field {
+                    TopicDialogField::Title => dialog.title.push(c),
+                    TopicDialogField::Content => dialog.content.push(c),
+                },
+                Action::Backspace => match dialog.active_field {
+                    TopicDialogField::Title => {
+                        dialog.title.pop();
                     }
-                }
-                Action::Backspace => {
-                    match dialog.active_field {
-                        TopicDialogField::Title => { dialog.title.pop(); }
-                        TopicDialogField::Content => { dialog.content.pop(); }
+                    TopicDialogField::Content => {
+                        dialog.content.pop();
                     }
-                }
+                },
                 Action::Select => {
                     if !dialog.title.trim().is_empty() {
                         if let Some(ref tx) = self.cmd_tx {
@@ -271,9 +289,15 @@ impl App {
         // Push message dialog.
         if let Some(ref mut dialog) = self.push_dialog {
             match action {
-                Action::Back => { self.push_dialog = None; }
-                Action::Char(c) => { dialog.content.push(c); }
-                Action::Backspace => { dialog.content.pop(); }
+                Action::Back => {
+                    self.push_dialog = None;
+                }
+                Action::Char(c) => {
+                    dialog.content.push(c);
+                }
+                Action::Backspace => {
+                    dialog.content.pop();
+                }
                 Action::Select => {
                     if let Some(agent) = self.state.agents.get(dialog.target_agent_idx) {
                         if let Some(ref tx) = self.cmd_tx {
@@ -380,7 +404,9 @@ impl App {
             Action::Select if self.screen == Screen::MessageBoard => {
                 if let Some(topic) = self.state.topics.get(self.state.selected_topic_idx) {
                     if let Some(ref tx) = self.cmd_tx {
-                        let _ = tx.send(TuiCmd::FetchTopic { topic_id: topic.id.clone() });
+                        let _ = tx.send(TuiCmd::FetchTopic {
+                            topic_id: topic.id.clone(),
+                        });
                     }
                 }
             }
@@ -426,45 +452,41 @@ impl App {
             Action::Char(']') if self.screen == Screen::Tasks => {
                 self.state.task_detail_scroll = self.state.task_detail_scroll.saturating_add(1);
             }
-            Action::Down => {
-                match self.screen {
-                    Screen::Tasks => {
-                        if self.state.selected_task_idx + 1 < self.state.tasks.len() {
-                            self.state.selected_task_idx += 1;
-                            self.state.task_detail_scroll = 0;
-                        }
+            Action::Down => match self.screen {
+                Screen::Tasks => {
+                    if self.state.selected_task_idx + 1 < self.state.tasks.len() {
+                        self.state.selected_task_idx += 1;
+                        self.state.task_detail_scroll = 0;
                     }
-                    Screen::MessageBoard => {
-                        if self.state.selected_topic_idx + 1 < self.state.topics.len() {
-                            self.state.selected_topic_idx += 1;
-                        }
-                    }
-                    Screen::Agents => {
-                        if self.state.selected_agent_idx + 1 < self.state.agents.len() {
-                            self.state.selected_agent_idx += 1;
-                        }
-                    }
-                    _ => {}
                 }
-            }
-            Action::Up => {
-                match self.screen {
-                    Screen::Tasks => {
-                        let prev = self.state.selected_task_idx;
-                        self.state.selected_task_idx = prev.saturating_sub(1);
-                        if self.state.selected_task_idx != prev {
-                            self.state.task_detail_scroll = 0;
-                        }
+                Screen::MessageBoard => {
+                    if self.state.selected_topic_idx + 1 < self.state.topics.len() {
+                        self.state.selected_topic_idx += 1;
                     }
-                    Screen::MessageBoard => {
-                        self.state.selected_topic_idx = self.state.selected_topic_idx.saturating_sub(1);
-                    }
-                    Screen::Agents => {
-                        self.state.selected_agent_idx = self.state.selected_agent_idx.saturating_sub(1);
-                    }
-                    _ => {}
                 }
-            }
+                Screen::Agents => {
+                    if self.state.selected_agent_idx + 1 < self.state.agents.len() {
+                        self.state.selected_agent_idx += 1;
+                    }
+                }
+                _ => {}
+            },
+            Action::Up => match self.screen {
+                Screen::Tasks => {
+                    let prev = self.state.selected_task_idx;
+                    self.state.selected_task_idx = prev.saturating_sub(1);
+                    if self.state.selected_task_idx != prev {
+                        self.state.task_detail_scroll = 0;
+                    }
+                }
+                Screen::MessageBoard => {
+                    self.state.selected_topic_idx = self.state.selected_topic_idx.saturating_sub(1);
+                }
+                Screen::Agents => {
+                    self.state.selected_agent_idx = self.state.selected_agent_idx.saturating_sub(1);
+                }
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -490,8 +512,13 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn render_task_fields(
-    f: &mut Frame, area: Rect, title: &str,
-    t: &str, desc: &str, tags: &str, active: &TaskDialogField,
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    t: &str,
+    desc: &str,
+    tags: &str,
+    active: &TaskDialogField,
 ) {
     let popup = centered_rect(65, 55, area);
     f.render_widget(Clear, popup);
@@ -501,17 +528,44 @@ fn render_task_fields(
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Length(3), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(0),
+        ])
         .split(inner);
 
     for (i, (label, content, is_active)) in [
         ("Title", t, matches!(active, TaskDialogField::Title)),
-        ("Description", desc, matches!(active, TaskDialogField::Description)),
-        ("Tags (comma-sep)", tags, matches!(active, TaskDialogField::Tags)),
-    ].iter().enumerate() {
-        let style = if *is_active { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default() };
+        (
+            "Description",
+            desc,
+            matches!(active, TaskDialogField::Description),
+        ),
+        (
+            "Tags (comma-sep)",
+            tags,
+            matches!(active, TaskDialogField::Tags),
+        ),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let style = if *is_active {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
         f.render_widget(
-            Paragraph::new(content.to_string()).block(Block::default().title(*label).borders(Borders::ALL).style(style)),
+            Paragraph::new(content.to_string()).block(
+                Block::default()
+                    .title(*label)
+                    .borders(Borders::ALL)
+                    .style(style),
+            ),
             rows[i],
         );
     }
@@ -519,8 +573,14 @@ fn render_task_fields(
 
 #[allow(clippy::too_many_arguments)]
 fn render_two_field_dialog(
-    f: &mut Frame, area: Rect, title: &str,
-    label1: &str, val1: &str, label2: &str, val2: &str, first_active: bool,
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    label1: &str,
+    val1: &str,
+    label2: &str,
+    val2: &str,
+    first_active: bool,
 ) {
     let popup = centered_rect(65, 50, area);
     f.render_widget(Clear, popup);
@@ -533,15 +593,33 @@ fn render_two_field_dialog(
         .constraints([Constraint::Length(3), Constraint::Min(3)])
         .split(inner);
 
-    let active_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let active_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
     f.render_widget(
-        Paragraph::new(val1.to_string()).block(Block::default().title(label1).borders(Borders::ALL)
-            .style(if first_active { active_style } else { Style::default() })),
+        Paragraph::new(val1.to_string()).block(
+            Block::default()
+                .title(label1)
+                .borders(Borders::ALL)
+                .style(if first_active {
+                    active_style
+                } else {
+                    Style::default()
+                }),
+        ),
         rows[0],
     );
     f.render_widget(
-        Paragraph::new(val2.to_string()).block(Block::default().title(label2).borders(Borders::ALL)
-            .style(if !first_active { active_style } else { Style::default() })),
+        Paragraph::new(val2.to_string()).block(
+            Block::default()
+                .title(label2)
+                .borders(Borders::ALL)
+                .style(if !first_active {
+                    active_style
+                } else {
+                    Style::default()
+                }),
+        ),
         rows[1],
     );
 }
@@ -553,8 +631,13 @@ fn render_single_field_dialog(f: &mut Frame, area: Rect, title: &str, label: &st
     let inner = block.inner(popup);
     f.render_widget(block, popup);
     f.render_widget(
-        Paragraph::new(val.to_string()).block(Block::default().title(label).borders(Borders::ALL)
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Paragraph::new(val.to_string()).block(
+            Block::default().title(label).borders(Borders::ALL).style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ),
         inner,
     );
 }
@@ -581,12 +664,16 @@ pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<(
         while let Ok(update) = rx.try_recv() {
             app.state.agents = update.agents;
             app.state.tasks = update.tasks.iter().map(|t| t.into()).collect();
-            app.state.topics = update.topics.iter().map(|t| super::state::TopicSummary {
-                id: t.id.clone(),
-                title: t.title.clone(),
-                comment_count: 0,
-                last_updated: Some(t.last_updated_at.to_rfc3339()),
-            }).collect();
+            app.state.topics = update
+                .topics
+                .iter()
+                .map(|t| super::state::TopicSummary {
+                    id: t.id.clone(),
+                    title: t.title.clone(),
+                    comment_count: 0,
+                    last_updated: Some(t.last_updated_at.to_rfc3339()),
+                })
+                .collect();
             if update.topic_detail_id.is_some() {
                 app.state.topic_detail_id = update.topic_detail_id;
                 app.state.topic_comments = update.topic_comments;
@@ -596,7 +683,11 @@ pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<(
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                    Constraint::Length(1),
+                ])
                 .split(f.area());
 
             super::dashboard::render_header(f, chunks[0], &app);
@@ -617,7 +708,9 @@ pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<(
                 "Enter:send  Esc:cancel"
             } else {
                 match app.screen {
-                    Screen::Tasks => "n:new  e:edit  s:cycle  r:reset  x:cancel  ↑↓:select  []:scroll  q:quit",
+                    Screen::Tasks => {
+                        "n:new  e:edit  s:cycle  r:reset  x:cancel  ↑↓:select  []:scroll  q:quit"
+                    }
                     Screen::MessageBoard => "n:new topic  c:comment  q:quit",
                     Screen::Agents => "p:push message  q:quit",
                     Screen::Settings => "s:start  S:stop  r:restart  R:reset  q:quit",
@@ -629,18 +722,51 @@ pub fn run(server_url: String, project_dir: PathBuf, config: Config) -> Result<(
             // Render active dialog overlays.
             let area = f.area();
             if let Some(ref d) = app.task_dialog {
-                render_task_fields(f, area, "New Task", &d.title, &d.description, &d.tags, &d.active_field);
+                render_task_fields(
+                    f,
+                    area,
+                    "New Task",
+                    &d.title,
+                    &d.description,
+                    &d.tags,
+                    &d.active_field,
+                );
             } else if let Some(ref d) = app.task_edit_dialog {
-                render_task_fields(f, area, "Edit Task", &d.title, &d.description, &d.tags, &d.active_field);
+                render_task_fields(
+                    f,
+                    area,
+                    "Edit Task",
+                    &d.title,
+                    &d.description,
+                    &d.tags,
+                    &d.active_field,
+                );
             } else if let Some(ref d) = app.topic_dialog {
-                render_two_field_dialog(f, area, "New Topic", "Title", &d.title, "Content", &d.content,
-                    matches!(d.active_field, TopicDialogField::Title));
+                render_two_field_dialog(
+                    f,
+                    area,
+                    "New Topic",
+                    "Title",
+                    &d.title,
+                    "Content",
+                    &d.content,
+                    matches!(d.active_field, TopicDialogField::Title),
+                );
             } else if let Some(ref d) = app.comment_dialog {
                 render_single_field_dialog(f, area, "Add Comment", "Comment", &d.content);
             } else if let Some(ref d) = app.push_dialog {
-                let target = app.state.agents.get(d.target_agent_idx)
+                let target = app
+                    .state
+                    .agents
+                    .get(d.target_agent_idx)
                     .map_or("?", |a| a.name.as_str());
-                render_single_field_dialog(f, area, &format!("Push → {target}"), "Message", &d.content);
+                render_single_field_dialog(
+                    f,
+                    area,
+                    &format!("Push → {target}"),
+                    "Message",
+                    &d.content,
+                );
             }
         })?;
 

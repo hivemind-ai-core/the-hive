@@ -7,9 +7,7 @@ use tracing_subscriber::EnvFilter;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
-    let filter = EnvFilter::new(format!(
-        "warn,hive_server={level},hive_core={level}"
-    ));
+    let filter = EnvFilter::new(format!("warn,hive_server={level},hive_core={level}"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     info!("Hive Server starting...");
@@ -18,8 +16,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "8080".to_string())
         .parse()?;
 
-    let db_path = std::env::var("HIVE_DB_PATH")
-        .unwrap_or_else(|_| "/data/hive.db".to_string());
+    let db_path = std::env::var("HIVE_DB_PATH").unwrap_or_else(|_| "/data/hive.db".to_string());
 
     info!("  Port: {}", port);
     info!("  Database: {}", db_path);

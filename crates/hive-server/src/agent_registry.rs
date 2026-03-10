@@ -286,7 +286,10 @@ mod tests {
         let pool = open_test_db();
         let (mut state, _rx) = make_agent_state("agent-1");
         state.registered = true;
-        registry.lock().unwrap().insert("agent-1".to_string(), state);
+        registry
+            .lock()
+            .unwrap()
+            .insert("agent-1".to_string(), state);
         assert!(!try_dispatch(&registry, &pool));
     }
 
@@ -297,7 +300,10 @@ mod tests {
         db_tasks::insert_task(&pool, &make_task("Pending task")).unwrap();
         // Agent is NOT registered — should be skipped.
         let (state, _rx) = make_agent_state("agent-1");
-        registry.lock().unwrap().insert("agent-1".to_string(), state);
+        registry
+            .lock()
+            .unwrap()
+            .insert("agent-1".to_string(), state);
         assert!(!try_dispatch(&registry, &pool));
     }
 
@@ -309,7 +315,10 @@ mod tests {
         let (mut state, _rx) = make_agent_state("agent-1");
         state.registered = true;
         state.active_tasks = 1; // at capacity (max=1)
-        registry.lock().unwrap().insert("agent-1".to_string(), state);
+        registry
+            .lock()
+            .unwrap()
+            .insert("agent-1".to_string(), state);
         assert!(!try_dispatch(&registry, &pool));
     }
 
@@ -320,7 +329,10 @@ mod tests {
         db_tasks::insert_task(&pool, &make_task("Dispatchable")).unwrap();
         let (mut state, mut rx) = make_agent_state("agent-1");
         state.registered = true;
-        registry.lock().unwrap().insert("agent-1".to_string(), state);
+        registry
+            .lock()
+            .unwrap()
+            .insert("agent-1".to_string(), state);
 
         assert!(try_dispatch(&registry, &pool));
 
@@ -351,7 +363,10 @@ mod tests {
         let (mut state, _rx) = make_agent_state("python-agent");
         state.registered = true;
         state.tags = vec!["python".to_string()];
-        registry.lock().unwrap().insert("python-agent".to_string(), state);
+        registry
+            .lock()
+            .unwrap()
+            .insert("python-agent".to_string(), state);
 
         assert!(!try_dispatch(&registry, &pool));
     }
@@ -398,7 +413,10 @@ mod tests {
     fn notify_agent_sends_push_notify() {
         let registry = new_registry();
         let (state, mut rx) = make_agent_state("agent-1");
-        registry.lock().unwrap().insert("agent-1".to_string(), state);
+        registry
+            .lock()
+            .unwrap()
+            .insert("agent-1".to_string(), state);
 
         let messages = serde_json::json!([{"content": "hello"}]);
         notify_agent(&registry, "agent-1", &messages);

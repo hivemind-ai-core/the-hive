@@ -2,9 +2,9 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     widgets::{Block, Borders},
+    Frame,
 };
 
 use super::render_field;
@@ -13,7 +13,9 @@ use crate::tui::config::state::{ConfigWizardState, WizardCmd};
 const FIELDS: usize = 3;
 
 pub fn render(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
-    let block = Block::default().title(" Server Configuration ").borders(Borders::ALL);
+    let block = Block::default()
+        .title(" Server Configuration ")
+        .borders(Borders::ALL);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -44,7 +46,9 @@ pub fn handle(code: KeyCode, _mods: KeyModifiers, state: &mut ConfigWizardState)
     if state.editing {
         match code {
             KeyCode::Char(c) => state.input.push(c),
-            KeyCode::Backspace => { state.input.pop(); }
+            KeyCode::Backspace => {
+                state.input.pop();
+            }
             KeyCode::Enter => commit(state),
             KeyCode::Esc => state.stop_editing(),
             _ => {}
@@ -54,7 +58,9 @@ pub fn handle(code: KeyCode, _mods: KeyModifiers, state: &mut ConfigWizardState)
 
     match code {
         KeyCode::Char('j') | KeyCode::Down => {
-            if state.field_idx + 1 < FIELDS { state.field_idx += 1; }
+            if state.field_idx + 1 < FIELDS {
+                state.field_idx += 1;
+            }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             state.field_idx = state.field_idx.saturating_sub(1);
@@ -84,9 +90,19 @@ fn current_value(state: &ConfigWizardState) -> String {
 fn commit(state: &mut ConfigWizardState) {
     let input = state.input.trim().to_string();
     match state.field_idx {
-        0 => { if let Ok(v) = input.parse::<u16>() { state.config.server.port = v; } }
-        1 => { if let Ok(v) = input.parse::<u16>() { state.config.server.host_port = v; } }
-        2 => { state.config.server.db_path = input; }
+        0 => {
+            if let Ok(v) = input.parse::<u16>() {
+                state.config.server.port = v;
+            }
+        }
+        1 => {
+            if let Ok(v) = input.parse::<u16>() {
+                state.config.server.host_port = v;
+            }
+        }
+        2 => {
+            state.config.server.db_path = input;
+        }
         _ => {}
     }
     state.stop_editing();

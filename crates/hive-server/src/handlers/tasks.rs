@@ -27,16 +27,23 @@ pub fn create(pool: &DbPool, params: Option<Value>) -> Result<Value> {
 
 #[allow(clippy::needless_pass_by_value)] // Params are passed owned from the WS dispatcher
 pub fn list(pool: &DbPool, params: Option<Value>) -> Result<Value> {
-    let status = params.as_ref().and_then(|v| v.get("status")).and_then(|v| v.as_str()).map(str::to_owned);
-    let tag = params.as_ref().and_then(|v| v.get("tag")).and_then(|v| v.as_str()).map(str::to_owned);
-    let agent = params.as_ref().and_then(|v| v.get("assigned_agent_id")).and_then(|v| v.as_str()).map(str::to_owned);
+    let status = params
+        .as_ref()
+        .and_then(|v| v.get("status"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    let tag = params
+        .as_ref()
+        .and_then(|v| v.get("tag"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    let agent = params
+        .as_ref()
+        .and_then(|v| v.get("assigned_agent_id"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
 
-    let tasks = db_tasks::list_tasks(
-        pool,
-        status.as_deref(),
-        tag.as_deref(),
-        agent.as_deref(),
-    )?;
+    let tasks = db_tasks::list_tasks(pool, status.as_deref(), tag.as_deref(), agent.as_deref())?;
     Ok(serde_json::to_value(&tasks)?)
 }
 
@@ -56,12 +63,13 @@ pub fn get(pool: &DbPool, params: Option<Value>) -> Result<Value> {
 
 pub fn update(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let p = params.unwrap_or(Value::Null);
-    let id = p.get("id")
+    let id = p
+        .get("id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.id is required"))?;
 
-    let mut task = db_tasks::get_task(pool, id)?
-        .ok_or_else(|| anyhow::anyhow!("task not found"))?;
+    let mut task =
+        db_tasks::get_task(pool, id)?.ok_or_else(|| anyhow::anyhow!("task not found"))?;
 
     if let Some(desc) = p.get("description").and_then(|v| v.as_str()) {
         task.description = Some(desc.to_string());
@@ -89,26 +97,45 @@ pub fn split(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     use hive_core::types::Task as HiveTask;
 
     let p = params.unwrap_or(Value::Null);
-    let id = p.get("id").and_then(|v| v.as_str())
+    let id = p
+        .get("id")
+        .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.id is required"))?;
-    let raw_subtasks = p.get("subtasks").and_then(|v| v.as_array())
+    let raw_subtasks = p
+        .get("subtasks")
+        .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("params.subtasks (array) is required"))?;
 
-    let subtasks: Vec<HiveTask> = raw_subtasks.iter().map(|v| {
-        if let Some(title) = v.as_str() {
-            // Plain string — treat as title only.
-            HiveTask::new(title.to_string(), None, vec![])
-        } else {
-            // Object with title, optional description and tags.
-            let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
-            let description = v.get("description").and_then(|d| d.as_str()).map(str::to_string);
-            let tags: Vec<String> = v.get("tags")
-                .and_then(|t| t.as_array())
-                .map(|arr| arr.iter().filter_map(|t| t.as_str().map(str::to_string)).collect())
-                .unwrap_or_default();
-            HiveTask::new(title, description, tags)
-        }
-    }).collect();
+    let subtasks: Vec<HiveTask> = raw_subtasks
+        .iter()
+        .map(|v| {
+            if let Some(title) = v.as_str() {
+                // Plain string — treat as title only.
+                HiveTask::new(title.to_string(), None, vec![])
+            } else {
+                // Object with title, optional description and tags.
+                let title = v
+                    .get("title")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let description = v
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .map(str::to_string);
+                let tags: Vec<String> = v
+                    .get("tags")
+                    .and_then(|t| t.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|t| t.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                HiveTask::new(title, description, tags)
+            }
+        })
+        .collect();
 
     let created = db_tasks::split(pool, id, subtasks)?;
     Ok(serde_json::to_value(&created)?)
@@ -116,9 +143,13 @@ pub fn split(pool: &DbPool, params: Option<Value>) -> Result<Value> {
 
 pub fn set_dependency(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let p = params.unwrap_or(Value::Null);
-    let task_id = p.get("task_id").and_then(|v| v.as_str())
+    let task_id = p
+        .get("task_id")
+        .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.task_id is required"))?;
-    let depends_on_id = p.get("depends_on_id").and_then(|v| v.as_str())
+    let depends_on_id = p
+        .get("depends_on_id")
+        .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.depends_on_id is required"))?;
     db_tasks::set_dependency(pool, task_id, depends_on_id)?;
     Ok(serde_json::json!({ "ok": true }))
@@ -126,7 +157,11 @@ pub fn set_dependency(pool: &DbPool, params: Option<Value>) -> Result<Value> {
 
 #[allow(clippy::needless_pass_by_value)] // Params are passed owned from the WS dispatcher
 pub fn get_next(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<Value> {
-    let tag = params.as_ref().and_then(|v| v.get("tag")).and_then(|v| v.as_str()).map(str::to_owned);
+    let tag = params
+        .as_ref()
+        .and_then(|v| v.get("tag"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
     match db_tasks::get_next(pool, agent_id, tag.as_deref())? {
         Some(task) => Ok(serde_json::to_value(&task)?),
         None => Ok(serde_json::json!(null)),
@@ -135,7 +170,8 @@ pub fn get_next(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<
 
 pub fn complete(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<Value> {
     let p = params.unwrap_or(Value::Null);
-    let id = p.get("id")
+    let id = p
+        .get("id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.id is required"))?;
     let result = p.get("result").and_then(|v| v.as_str()).map(str::to_string);
@@ -167,9 +203,9 @@ fn validate_transition(
 ) -> Result<()> {
     use hive_core::types::TaskStatus::*;
     let allowed = match from {
-        Pending     => &[InProgress, Cancelled, Blocked][..],
-        InProgress  => &[Done, Blocked, Cancelled, Pending][..], // Pending = operator reset
-        Blocked     => &[Pending, Cancelled][..],
+        Pending => &[InProgress, Cancelled, Blocked][..],
+        InProgress => &[Done, Blocked, Cancelled, Pending][..], // Pending = operator reset
+        Blocked => &[Pending, Cancelled][..],
         Done | Cancelled => &[][..],
     };
     if allowed.contains(&to) || from == to {
@@ -182,8 +218,8 @@ fn validate_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hive_core::types::TaskStatus::*;
     use crate::db;
+    use hive_core::types::TaskStatus::*;
     use serde_json::json;
 
     fn open_test_db() -> crate::db::DbPool {
@@ -218,7 +254,10 @@ mod tests {
     fn terminal_states_reject_all_transitions() {
         for from in [Done, Cancelled] {
             for to in [Pending, InProgress, Blocked] {
-                assert!(validate_transition(from, to).is_err(), "{from} → {to} should be rejected");
+                assert!(
+                    validate_transition(from, to).is_err(),
+                    "{from} → {to} should be rejected"
+                );
             }
         }
         assert!(validate_transition(Done, Cancelled).is_err());
@@ -253,14 +292,22 @@ mod tests {
     #[test]
     fn create_with_tags_and_description() {
         let pool = open_test_db();
-        let result = create(&pool, Some(json!({
-            "title": "Tagged",
-            "description": "A task",
-            "tags": ["rust", "test"]
-        }))).unwrap();
+        let result = create(
+            &pool,
+            Some(json!({
+                "title": "Tagged",
+                "description": "A task",
+                "tags": ["rust", "test"]
+            })),
+        )
+        .unwrap();
         assert_eq!(result["description"], "A task");
-        let tags: Vec<&str> = result["tags"].as_array().unwrap()
-            .iter().map(|t| t.as_str().unwrap()).collect();
+        let tags: Vec<&str> = result["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t.as_str().unwrap())
+            .collect();
         assert!(tags.contains(&"rust"));
         assert!(tags.contains(&"test"));
     }
@@ -352,7 +399,8 @@ mod tests {
         create(&pool, Some(json!({"title": "Second"}))).unwrap();
         let claimed = get_next(&pool, "agent-1", None).unwrap();
         let id = claimed["id"].as_str().unwrap();
-        let result = complete(&pool, "agent-1", Some(json!({"id": id, "result": "done!"}))).unwrap();
+        let result =
+            complete(&pool, "agent-1", Some(json!({"id": id, "result": "done!"}))).unwrap();
         assert_eq!(result["completed"].as_str().unwrap(), id);
         assert!(result["next_task"].is_object());
         assert_eq!(result["next_task"]["title"], "Second");
@@ -377,7 +425,11 @@ mod tests {
         let pool = open_test_db();
         let created = create(&pool, Some(json!({"title": "T"}))).unwrap();
         let id = created["id"].as_str().unwrap();
-        let result = update(&pool, Some(json!({"id": id, "description": "New desc", "tags": ["a"]}))).unwrap();
+        let result = update(
+            &pool,
+            Some(json!({"id": id, "description": "New desc", "tags": ["a"]})),
+        )
+        .unwrap();
         assert_eq!(result["description"], "New desc");
     }
 

@@ -28,11 +28,19 @@ pub mod test_helpers {
     }
 
     pub fn make_topic(title: &str) -> Topic {
-        Topic::new(title.to_string(), "content".to_string(), Some("agent-1".to_string()))
+        Topic::new(
+            title.to_string(),
+            "content".to_string(),
+            Some("agent-1".to_string()),
+        )
     }
 
     pub fn make_comment(topic_id: &str, content: &str) -> Comment {
-        Comment::new(topic_id.to_string(), content.to_string(), Some("agent-1".to_string()))
+        Comment::new(
+            topic_id.to_string(),
+            content.to_string(),
+            Some("agent-1".to_string()),
+        )
     }
 
     pub fn make_agent(id: &str) -> Agent {

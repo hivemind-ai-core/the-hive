@@ -32,7 +32,12 @@ async fn start_server() -> SocketAddr {
 }
 
 /// Connect a WS client as a named agent.
-async fn connect(addr: SocketAddr, agent_id: &str) -> impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin {
+async fn connect(
+    addr: SocketAddr,
+    agent_id: &str,
+) -> impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error>
+       + StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+       + Unpin {
     let url = format!("ws://{addr}/ws?agent_id={agent_id}");
     let (ws, _) = connect_async(&url).await.unwrap();
     ws
@@ -53,7 +58,9 @@ fn req(method: &str, params: serde_json::Value) -> String {
 
 /// Send a request and receive the next message.
 async fn call(
-    ws: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin),
+    ws: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error>
+              + StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+              + Unpin),
     method: &str,
     params: serde_json::Value,
 ) -> ApiMessage {
@@ -88,11 +95,16 @@ async fn test_task_create_and_list() {
     let mut ws = connect(addr, "agent-1").await;
 
     // Create a task.
-    let resp = call(&mut ws, "task.create", serde_json::json!({
-        "title": "Fix the bug",
-        "description": "It is broken",
-        "tags": ["backend"]
-    })).await;
+    let resp = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({
+            "title": "Fix the bug",
+            "description": "It is broken",
+            "tags": ["backend"]
+        }),
+    )
+    .await;
     assert!(resp.error.is_none(), "create error: {:?}", resp.error);
     let task = resp.result.unwrap();
     let task_id = task["id"].as_str().unwrap().to_string();
@@ -112,7 +124,12 @@ async fn test_task_get() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "task.create", serde_json::json!({ "title": "Task A" })).await;
+    let resp = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Task A" }),
+    )
+    .await;
     let id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
 
     let resp = call(&mut ws, "task.get", serde_json::json!({ "id": id })).await;
@@ -125,7 +142,12 @@ async fn test_task_get_next_and_complete() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    call(&mut ws, "task.create", serde_json::json!({ "title": "Task 1" })).await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Task 1" }),
+    )
+    .await;
 
     // Claim next task.
     let resp = call(&mut ws, "task.get_next", serde_json::json!({})).await;
@@ -136,10 +158,15 @@ async fn test_task_get_next_and_complete() {
     let id = task["id"].as_str().unwrap().to_string();
 
     // Complete it.
-    let resp = call(&mut ws, "task.complete", serde_json::json!({
-        "id": id,
-        "result": "done"
-    })).await;
+    let resp = call(
+        &mut ws,
+        "task.complete",
+        serde_json::json!({
+            "id": id,
+            "result": "done"
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let result = resp.result.unwrap();
     assert_eq!(result["completed"], id);
@@ -184,16 +211,31 @@ async fn test_task_dependency_ordering() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let r1 = call(&mut ws, "task.create", serde_json::json!({ "title": "Step 1" })).await;
+    let r1 = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Step 1" }),
+    )
+    .await;
     let id1 = r1.result.unwrap()["id"].as_str().unwrap().to_string();
-    let r2 = call(&mut ws, "task.create", serde_json::json!({ "title": "Step 2" })).await;
+    let r2 = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Step 2" }),
+    )
+    .await;
     let id2 = r2.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Step 2 depends on Step 1.
-    let resp = call(&mut ws, "task.set_dependency", serde_json::json!({
-        "task_id": id2,
-        "depends_on_id": id1
-    })).await;
+    let resp = call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({
+            "task_id": id2,
+            "depends_on_id": id1
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
 
     // get_next should return Step 1 (no unmet deps).
@@ -220,14 +262,24 @@ async fn test_task_set_dependency_cycle_rejected() {
     let r2 = call(&mut ws, "task.create", serde_json::json!({ "title": "B" })).await;
     let id2 = r2.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    call(&mut ws, "task.set_dependency", serde_json::json!({
-        "task_id": id2, "depends_on_id": id1
-    })).await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({
+            "task_id": id2, "depends_on_id": id1
+        }),
+    )
+    .await;
 
     // Creating a cycle (B → A already exists, now A → B) should fail.
-    let resp = call(&mut ws, "task.set_dependency", serde_json::json!({
-        "task_id": id1, "depends_on_id": id2
-    })).await;
+    let resp = call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({
+            "task_id": id1, "depends_on_id": id2
+        }),
+    )
+    .await;
     assert!(resp.error.is_some(), "cycle should be rejected");
 }
 
@@ -236,14 +288,24 @@ async fn test_task_split() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let r = call(&mut ws, "task.create", serde_json::json!({ "title": "Big Task" })).await;
+    let r = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Big Task" }),
+    )
+    .await;
     let id = r.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Split with plain strings.
-    let resp = call(&mut ws, "task.split", serde_json::json!({
-        "id": id,
-        "subtasks": ["Sub A", "Sub B"]
-    })).await;
+    let resp = call(
+        &mut ws,
+        "task.split",
+        serde_json::json!({
+            "id": id,
+            "subtasks": ["Sub A", "Sub B"]
+        }),
+    )
+    .await;
     assert!(resp.error.is_none(), "split error: {:?}", resp.error);
     let subs = resp.result.unwrap();
     assert_eq!(subs.as_array().unwrap().len(), 2);
@@ -258,18 +320,28 @@ async fn test_topic_create_and_comment() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "topic.create", serde_json::json!({
-        "title": "Discussion",
-        "content": "Let's talk"
-    })).await;
+    let resp = call(
+        &mut ws,
+        "topic.create",
+        serde_json::json!({
+            "title": "Discussion",
+            "content": "Let's talk"
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let topic_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let resp = call(&mut ws, "topic.comment", serde_json::json!({
-        "topic_id": topic_id,
-        "content": "Good idea",
-        "creator_agent_id": "agent-1"
-    })).await;
+    let resp = call(
+        &mut ws,
+        "topic.comment",
+        serde_json::json!({
+            "topic_id": topic_id,
+            "content": "Good idea",
+            "creator_agent_id": "agent-1"
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
 
     let resp = call(&mut ws, "topic.get", serde_json::json!({ "id": topic_id })).await;
@@ -284,8 +356,18 @@ async fn test_topic_list() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    call(&mut ws, "topic.create", serde_json::json!({ "title": "T1", "content": "" })).await;
-    call(&mut ws, "topic.create", serde_json::json!({ "title": "T2", "content": "" })).await;
+    call(
+        &mut ws,
+        "topic.create",
+        serde_json::json!({ "title": "T1", "content": "" }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "topic.create",
+        serde_json::json!({ "title": "T2", "content": "" }),
+    )
+    .await;
 
     let resp = call(&mut ws, "topic.list", serde_json::json!({})).await;
     assert!(resp.error.is_none());
@@ -299,10 +381,15 @@ async fn test_push_send_and_ack() {
     let mut ws2 = connect(addr, "receiver").await;
 
     // Send a push message from sender to receiver.
-    let resp = call(&mut ws1, "push.send", serde_json::json!({
-        "to_agent_id": "receiver",
-        "content": "hello!"
-    })).await;
+    let resp = call(
+        &mut ws1,
+        "push.send",
+        serde_json::json!({
+            "to_agent_id": "receiver",
+            "content": "hello!"
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let msg_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
 
@@ -313,9 +400,14 @@ async fn test_push_send_and_ack() {
     assert!(resp.error.is_none());
 
     // Ack the message.
-    let resp = call(&mut ws2, "push.ack", serde_json::json!({
-        "message_ids": [msg_id]
-    })).await;
+    let resp = call(
+        &mut ws2,
+        "push.ack",
+        serde_json::json!({
+            "message_ids": [msg_id]
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     assert_eq!(resp.result.unwrap()["acked"], 1);
 }
@@ -325,11 +417,16 @@ async fn test_agent_register_and_list() {
     let addr = start_server().await;
     let mut ws = connect(addr, "my-agent").await;
 
-    let resp = call(&mut ws, "agent.register", serde_json::json!({
-        "id": "my-agent",
-        "name": "My Agent",
-        "tags": ["backend"]
-    })).await;
+    let resp = call(
+        &mut ws,
+        "agent.register",
+        serde_json::json!({
+            "id": "my-agent",
+            "name": "My Agent",
+            "tags": ["backend"]
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
 
     let resp = call(&mut ws, "agent.list", serde_json::json!({})).await;
@@ -344,14 +441,24 @@ async fn test_task_update() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let r = call(&mut ws, "task.create", serde_json::json!({ "title": "Old Title" })).await;
+    let r = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Old Title" }),
+    )
+    .await;
     let id = r.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let resp = call(&mut ws, "task.update", serde_json::json!({
-        "id": id,
-        "description": "Updated desc",
-        "tags": ["new-tag"]
-    })).await;
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({
+            "id": id,
+            "description": "Updated desc",
+            "tags": ["new-tag"]
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let task = resp.result.unwrap();
     assert_eq!(task["description"], "Updated desc");
@@ -363,17 +470,31 @@ async fn test_task_split_object_format() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let r = call(&mut ws, "task.create", serde_json::json!({ "title": "Parent" })).await;
+    let r = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Parent" }),
+    )
+    .await;
     let id = r.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let resp = call(&mut ws, "task.split", serde_json::json!({
-        "id": id,
-        "subtasks": [
-            { "title": "Sub 1", "description": "First sub", "tags": ["a"] },
-            { "title": "Sub 2" }
-        ]
-    })).await;
-    assert!(resp.error.is_none(), "split object format error: {:?}", resp.error);
+    let resp = call(
+        &mut ws,
+        "task.split",
+        serde_json::json!({
+            "id": id,
+            "subtasks": [
+                { "title": "Sub 1", "description": "First sub", "tags": ["a"] },
+                { "title": "Sub 2" }
+            ]
+        }),
+    )
+    .await;
+    assert!(
+        resp.error.is_none(),
+        "split object format error: {:?}",
+        resp.error
+    );
     let subs = resp.result.unwrap();
     let arr = subs.as_array().unwrap();
     assert_eq!(arr.len(), 2);
@@ -385,7 +506,9 @@ async fn test_task_split_object_format() {
 
 /// Read the next Push message from `ws` with a timeout. Skips non-Push messages.
 async fn recv_push(
-    ws: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin),
+    ws: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error>
+              + StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+              + Unpin),
     method: &str,
 ) -> ApiMessage {
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -393,9 +516,7 @@ async fn recv_push(
             let raw = ws.next().await.unwrap().unwrap();
             if let Message::Text(t) = raw {
                 let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                if msg.msg_type == MessageType::Push
-                    && msg.method.as_deref() == Some(method)
-                {
+                if msg.msg_type == MessageType::Push && msg.method.as_deref() == Some(method) {
                     return msg;
                 }
             }
@@ -414,13 +535,21 @@ async fn test_broadcast_tasks_updated_on_create() {
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
     // Agent-1 creates a task.
-    call(&mut ws1, "task.create", serde_json::json!({ "title": "Broadcast Task" })).await;
+    call(
+        &mut ws1,
+        "task.create",
+        serde_json::json!({ "title": "Broadcast Task" }),
+    )
+    .await;
 
     // Agent-2 should receive a tasks.updated broadcast.
     let push = recv_push(&mut ws2, "tasks.updated").await;
     let tasks = push.params.unwrap();
     let arr = tasks.as_array().unwrap();
-    assert!(arr.iter().any(|t| t["title"] == "Broadcast Task"), "tasks.updated must include the new task");
+    assert!(
+        arr.iter().any(|t| t["title"] == "Broadcast Task"),
+        "tasks.updated must include the new task"
+    );
 }
 
 #[tokio::test]
@@ -431,20 +560,34 @@ async fn test_broadcast_topics_updated_on_comment() {
 
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
-    let r = call(&mut ws1, "topic.create", serde_json::json!({ "title": "Disc", "content": "" })).await;
+    let r = call(
+        &mut ws1,
+        "topic.create",
+        serde_json::json!({ "title": "Disc", "content": "" }),
+    )
+    .await;
     let topic_id = r.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Consume the topics.updated broadcast from topic.create on ws2.
     recv_push(&mut ws2, "topics.updated").await;
 
     // Agent-1 comments — another topics.updated broadcast.
-    call(&mut ws1, "topic.comment", serde_json::json!({
-        "topic_id": topic_id, "content": "hello", "creator_agent_id": "agent-1"
-    })).await;
+    call(
+        &mut ws1,
+        "topic.comment",
+        serde_json::json!({
+            "topic_id": topic_id, "content": "hello", "creator_agent_id": "agent-1"
+        }),
+    )
+    .await;
 
     let push = recv_push(&mut ws2, "topics.updated").await;
     let topics = push.params.unwrap();
-    assert!(topics.as_array().unwrap().iter().any(|t| t["id"] == topic_id));
+    assert!(topics
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["id"] == topic_id));
 }
 
 #[tokio::test]
@@ -456,14 +599,23 @@ async fn test_broadcast_agents_updated_on_register() {
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
     // Agent-1 registers.
-    call(&mut ws1, "agent.register", serde_json::json!({
-        "id": "agent-1", "name": "Bot One", "tags": []
-    })).await;
+    call(
+        &mut ws1,
+        "agent.register",
+        serde_json::json!({
+            "id": "agent-1", "name": "Bot One", "tags": []
+        }),
+    )
+    .await;
 
     // Agent-2 gets agents.updated broadcast.
     let push = recv_push(&mut ws2, "agents.updated").await;
     let agents = push.params.unwrap();
-    assert!(agents.as_array().unwrap().iter().any(|a| a["id"] == "agent-1"));
+    assert!(agents
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|a| a["id"] == "agent-1"));
 }
 
 // ── WS protocol error handling ───────────────────────────────────────────────
@@ -474,7 +626,11 @@ async fn test_ws_unknown_method_returns_404_error() {
     let mut ws = connect(addr, "agent-1").await;
 
     let resp = call(&mut ws, "does.not.exist", serde_json::json!({})).await;
-    assert_eq!(resp.msg_type, MessageType::Error, "unknown method must return Error type");
+    assert_eq!(
+        resp.msg_type,
+        MessageType::Error,
+        "unknown method must return Error type"
+    );
     assert_eq!(resp.error.unwrap().code, 404);
 }
 
@@ -484,14 +640,19 @@ async fn test_ws_malformed_json_does_not_break_connection() {
     let mut ws = connect(addr, "agent-1").await;
 
     // Send garbage — server should log and ignore, NOT close the connection.
-    ws.send(Message::text("this is not json at all {{{")).await.unwrap();
+    ws.send(Message::text("this is not json at all {{{"))
+        .await
+        .unwrap();
 
     // Give server a moment to process the garbage.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     // Connection should still work — a valid ping must succeed.
     let resp = call(&mut ws, "ping", serde_json::json!({})).await;
-    assert!(resp.error.is_none(), "connection must remain functional after malformed message");
+    assert!(
+        resp.error.is_none(),
+        "connection must remain functional after malformed message"
+    );
     assert_eq!(resp.result.unwrap()["pong"], true);
 }
 
@@ -504,14 +665,13 @@ async fn test_ws_missing_agent_id_drops_connection() {
     let (mut ws, _) = connect_async(&url).await.unwrap();
 
     // The server drops the connection immediately. ws.next() should return None or an error.
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        ws.next()
-    ).await.expect("timed out waiting for server to close connection");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(2), ws.next())
+        .await
+        .expect("timed out waiting for server to close connection");
 
     // Either None (clean close) or Some(Ok(Close frame)) or Some(Err(...)).
     match result {
-        None => {} // clean close
+        None => {}                        // clean close
         Some(Ok(Message::Close(_))) => {} // explicit close frame
         Some(Ok(_)) => panic!("expected connection to be closed, not a data message"),
         Some(Err(_)) => {} // connection error is also acceptable
@@ -526,25 +686,44 @@ async fn test_agent_register_upsert_semantics() {
     let mut ws = connect(addr, "agent-x").await;
 
     // First registration.
-    let resp = call(&mut ws, "agent.register", serde_json::json!({
-        "id": "agent-x", "name": "Old Name", "tags": []
-    })).await;
+    let resp = call(
+        &mut ws,
+        "agent.register",
+        serde_json::json!({
+            "id": "agent-x", "name": "Old Name", "tags": []
+        }),
+    )
+    .await;
     assert!(resp.error.is_none(), "first register should succeed");
 
     // Second registration with same ID — must update, not error.
-    let resp = call(&mut ws, "agent.register", serde_json::json!({
-        "id": "agent-x", "name": "New Name", "tags": ["backend"]
-    })).await;
-    assert!(resp.error.is_none(), "re-register must succeed (upsert semantics)");
+    let resp = call(
+        &mut ws,
+        "agent.register",
+        serde_json::json!({
+            "id": "agent-x", "name": "New Name", "tags": ["backend"]
+        }),
+    )
+    .await;
+    assert!(
+        resp.error.is_none(),
+        "re-register must succeed (upsert semantics)"
+    );
 
     // agent.list should show updated name and tags.
     let resp = call(&mut ws, "agent.list", serde_json::json!({})).await;
     let arr = resp.result.unwrap();
-    let agent = arr.as_array().unwrap().iter()
+    let agent = arr
+        .as_array()
+        .unwrap()
+        .iter()
         .find(|a| a["id"] == "agent-x")
         .expect("agent-x must be in list");
     assert_eq!(agent["name"], "New Name");
-    assert!(agent["tags"].as_array().unwrap().contains(&serde_json::json!("backend")));
+    assert!(agent["tags"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("backend")));
 }
 
 #[tokio::test]
@@ -552,9 +731,14 @@ async fn test_agent_register_empty_id_rejected() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "agent.register", serde_json::json!({
-        "id": "", "name": "Unnamed"
-    })).await;
+    let resp = call(
+        &mut ws,
+        "agent.register",
+        serde_json::json!({
+            "id": "", "name": "Unnamed"
+        }),
+    )
+    .await;
     assert!(resp.error.is_some(), "empty agent ID must be rejected");
 }
 
@@ -567,9 +751,14 @@ async fn test_agent_without_register_not_in_list() {
     let mut ws_reg = connect(addr, "registered").await;
 
     // Only the registered agent calls agent.register.
-    call(&mut ws_reg, "agent.register", serde_json::json!({
-        "id": "registered", "name": "Registered Agent", "tags": []
-    })).await;
+    call(
+        &mut ws_reg,
+        "agent.register",
+        serde_json::json!({
+            "id": "registered", "name": "Registered Agent", "tags": []
+        }),
+    )
+    .await;
 
     // Trigger touch_agent by having the unregistered agent make any request.
     call(&mut ws_unreg, "ping", serde_json::json!({})).await;
@@ -578,8 +767,14 @@ async fn test_agent_without_register_not_in_list() {
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
 
-    assert!(arr.iter().any(|a| a["id"] == "registered"), "registered agent must appear");
-    assert!(!arr.iter().any(|a| a["id"] == "never-registered"), "unregistered agent must NOT appear in list");
+    assert!(
+        arr.iter().any(|a| a["id"] == "registered"),
+        "registered agent must appear"
+    );
+    assert!(
+        !arr.iter().any(|a| a["id"] == "never-registered"),
+        "unregistered agent must NOT appear in list"
+    );
 }
 
 // ── topic.list_new timestamp filtering ───────────────────────────────────────
@@ -595,13 +790,21 @@ async fn test_topic_list_new_timestamp_filtering() {
     assert_eq!(resp.result.unwrap().as_array().unwrap().len(), 0);
 
     // Create Topic-A.
-    let ra = call(&mut ws, "topic.create", serde_json::json!({ "title": "Topic-A", "content": "" })).await;
+    let ra = call(
+        &mut ws,
+        "topic.create",
+        serde_json::json!({ "title": "Topic-A", "content": "" }),
+    )
+    .await;
     let id_a = ra.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // list_new since 0 now includes Topic-A.
     let resp = call(&mut ws, "topic.list_new", serde_json::json!({ "since": 0 })).await;
     let arr = resp.result.unwrap();
-    assert!(arr.as_array().unwrap().iter().any(|t| t["id"] == id_a), "Topic-A should appear after since=0");
+    assert!(
+        arr.as_array().unwrap().iter().any(|t| t["id"] == id_a),
+        "Topic-A should appear after since=0"
+    );
 
     // Record current timestamp, then create Topic-B after it.
     let now_secs = std::time::SystemTime::now()
@@ -611,30 +814,67 @@ async fn test_topic_list_new_timestamp_filtering() {
 
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await; // ensure > 1 second gap
 
-    let rb = call(&mut ws, "topic.create", serde_json::json!({ "title": "Topic-B", "content": "" })).await;
+    let rb = call(
+        &mut ws,
+        "topic.create",
+        serde_json::json!({ "title": "Topic-B", "content": "" }),
+    )
+    .await;
     let id_b = rb.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // list_new since now_secs should return Topic-B but NOT Topic-A.
-    let resp = call(&mut ws, "topic.list_new", serde_json::json!({ "since": now_secs })).await;
+    let resp = call(
+        &mut ws,
+        "topic.list_new",
+        serde_json::json!({ "since": now_secs }),
+    )
+    .await;
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
-    assert!(arr.iter().any(|t| t["id"] == id_b), "Topic-B should appear in list_new since T");
-    assert!(!arr.iter().any(|t| t["id"] == id_a), "Topic-A should NOT appear in list_new since T");
+    assert!(
+        arr.iter().any(|t| t["id"] == id_b),
+        "Topic-B should appear in list_new since T"
+    );
+    assert!(
+        !arr.iter().any(|t| t["id"] == id_a),
+        "Topic-A should NOT appear in list_new since T"
+    );
 
     // Commenting on Topic-A bumps its last_updated_at — it should now appear.
-    call(&mut ws, "topic.comment", serde_json::json!({
-        "topic_id": id_a,
-        "content": "bump",
-        "creator_agent_id": "agent-1"
-    })).await;
-    let resp = call(&mut ws, "topic.list_new", serde_json::json!({ "since": now_secs })).await;
+    call(
+        &mut ws,
+        "topic.comment",
+        serde_json::json!({
+            "topic_id": id_a,
+            "content": "bump",
+            "creator_agent_id": "agent-1"
+        }),
+    )
+    .await;
+    let resp = call(
+        &mut ws,
+        "topic.list_new",
+        serde_json::json!({ "since": now_secs }),
+    )
+    .await;
     let arr = resp.result.unwrap();
-    assert!(arr.as_array().unwrap().iter().any(|t| t["id"] == id_a),
-        "Topic-A should appear after comment bumps last_updated_at");
+    assert!(
+        arr.as_array().unwrap().iter().any(|t| t["id"] == id_a),
+        "Topic-A should appear after comment bumps last_updated_at"
+    );
 
     // Far-future timestamp returns empty.
-    let resp = call(&mut ws, "topic.list_new", serde_json::json!({ "since": 9_999_999_999u64 })).await;
-    assert_eq!(resp.result.unwrap().as_array().unwrap().len(), 0, "future timestamp should return empty");
+    let resp = call(
+        &mut ws,
+        "topic.list_new",
+        serde_json::json!({ "since": 9_999_999_999u64 }),
+    )
+    .await;
+    assert_eq!(
+        resp.result.unwrap().as_array().unwrap().len(),
+        0,
+        "future timestamp should return empty"
+    );
 }
 
 // ── topic validation and ordering ────────────────────────────────────────────
@@ -644,7 +884,12 @@ async fn test_topic_create_empty_title_rejected() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "topic.create", serde_json::json!({ "title": "", "content": "hi" })).await;
+    let resp = call(
+        &mut ws,
+        "topic.create",
+        serde_json::json!({ "title": "", "content": "hi" }),
+    )
+    .await;
     assert!(resp.error.is_some(), "empty topic title must be rejected");
 }
 
@@ -653,8 +898,16 @@ async fn test_topic_get_nonexistent_returns_error() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "topic.get", serde_json::json!({ "id": "does-not-exist" })).await;
-    assert!(resp.error.is_some(), "non-existent topic.get must return an error");
+    let resp = call(
+        &mut ws,
+        "topic.get",
+        serde_json::json!({ "id": "does-not-exist" }),
+    )
+    .await;
+    assert!(
+        resp.error.is_some(),
+        "non-existent topic.get must return an error"
+    );
     assert!(resp.result.is_none());
 }
 
@@ -664,24 +917,42 @@ async fn test_topic_list_ordered_by_last_updated() {
     let mut ws = connect(addr, "agent-1").await;
 
     // Create Topic-A then Topic-B (B is newer).
-    let ra = call(&mut ws, "topic.create", serde_json::json!({ "title": "Topic-A", "content": "" })).await;
+    let ra = call(
+        &mut ws,
+        "topic.create",
+        serde_json::json!({ "title": "Topic-A", "content": "" }),
+    )
+    .await;
     let id_a = ra.result.unwrap()["id"].as_str().unwrap().to_string();
     // Small sleep ensures distinct timestamps.
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    call(&mut ws, "topic.create", serde_json::json!({ "title": "Topic-B", "content": "" })).await;
+    call(
+        &mut ws,
+        "topic.create",
+        serde_json::json!({ "title": "Topic-B", "content": "" }),
+    )
+    .await;
 
     // Without comments: B (newer) should be first.
     let resp = call(&mut ws, "topic.list", serde_json::json!({})).await;
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
-    assert_eq!(arr[0]["title"], "Topic-B", "newer topic should appear first");
+    assert_eq!(
+        arr[0]["title"], "Topic-B",
+        "newer topic should appear first"
+    );
 
     // Now comment on A — bumps A's last_updated_at.
-    call(&mut ws, "topic.comment", serde_json::json!({
-        "topic_id": id_a,
-        "content": "bump!",
-        "creator_agent_id": "agent-1"
-    })).await;
+    call(
+        &mut ws,
+        "topic.comment",
+        serde_json::json!({
+            "topic_id": id_a,
+            "content": "bump!",
+            "creator_agent_id": "agent-1"
+        }),
+    )
+    .await;
 
     // Now A should be first (more recently updated).
     let resp = call(&mut ws, "topic.list", serde_json::json!({})).await;
@@ -698,19 +969,34 @@ async fn test_push_ack_idempotent() {
     let mut ws = connect(addr, "agent-1").await;
 
     // Send a push to ourselves (offline — we won't read the WS push).
-    let resp = call(&mut ws, "push.send", serde_json::json!({
-        "to_agent_id": "agent-1",
-        "content": "ack me twice"
-    })).await;
+    let resp = call(
+        &mut ws,
+        "push.send",
+        serde_json::json!({
+            "to_agent_id": "agent-1",
+            "content": "ack me twice"
+        }),
+    )
+    .await;
     // May be live-delivered (we're connected), so grab the id regardless.
     let msg_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Ack once.
-    let resp = call(&mut ws, "push.ack", serde_json::json!({ "message_ids": [&msg_id] })).await;
+    let resp = call(
+        &mut ws,
+        "push.ack",
+        serde_json::json!({ "message_ids": [&msg_id] }),
+    )
+    .await;
     assert!(resp.error.is_none(), "first ack should succeed");
 
     // Ack again — must not error (idempotent UPDATE).
-    let resp = call(&mut ws, "push.ack", serde_json::json!({ "message_ids": [&msg_id] })).await;
+    let resp = call(
+        &mut ws,
+        "push.ack",
+        serde_json::json!({ "message_ids": [&msg_id] }),
+    )
+    .await;
     assert!(resp.error.is_none(), "double-ack must be idempotent");
 }
 
@@ -719,7 +1005,12 @@ async fn test_push_ack_empty_array() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "push.ack", serde_json::json!({ "message_ids": [] })).await;
+    let resp = call(
+        &mut ws,
+        "push.ack",
+        serde_json::json!({ "message_ids": [] }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let result = resp.result.unwrap();
     assert_eq!(result["acked"], 0);
@@ -731,11 +1022,19 @@ async fn test_push_ack_unknown_ids_no_error() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "push.ack", serde_json::json!({
-        "message_ids": ["does-not-exist-at-all"]
-    })).await;
+    let resp = call(
+        &mut ws,
+        "push.ack",
+        serde_json::json!({
+            "message_ids": ["does-not-exist-at-all"]
+        }),
+    )
+    .await;
     // The UPDATE affects 0 rows but should not error.
-    assert!(resp.error.is_none(), "acking unknown IDs should be a no-op, not an error");
+    assert!(
+        resp.error.is_none(),
+        "acking unknown IDs should be a no-op, not an error"
+    );
 }
 
 #[tokio::test]
@@ -744,7 +1043,10 @@ async fn test_push_ack_missing_message_ids_returns_error() {
     let mut ws = connect(addr, "agent-1").await;
 
     let resp = call(&mut ws, "push.ack", serde_json::json!({})).await;
-    assert!(resp.error.is_some(), "missing message_ids field must return an error");
+    assert!(
+        resp.error.is_some(),
+        "missing message_ids field must return an error"
+    );
 }
 
 // ── push delivery tests ───────────────────────────────────────────────────────
@@ -761,32 +1063,37 @@ async fn test_push_live_delivery_still_in_list_until_acked() {
     // Give the server a moment to register both connections.
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
-    let resp = call(&mut sender, "push.send", serde_json::json!({
-        "to_agent_id": "receiver",
-        "content": "live hello"
-    })).await;
+    let resp = call(
+        &mut sender,
+        "push.send",
+        serde_json::json!({
+            "to_agent_id": "receiver",
+            "content": "live hello"
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let msg_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Receiver should get a Push-type WS message.
-    let push_received = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            loop {
-                let raw = receiver.next().await.unwrap().unwrap();
-                if let Message::Text(t) = raw {
-                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.msg_type == MessageType::Push {
-                        return msg;
-                    }
+    let push_received = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let raw = receiver.next().await.unwrap().unwrap();
+            if let Message::Text(t) = raw {
+                let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                if msg.msg_type == MessageType::Push {
+                    return msg;
                 }
             }
         }
-    ).await.expect("timed out waiting for push WS notification");
+    })
+    .await
+    .expect("timed out waiting for push WS notification");
 
     // push.notify wraps messages in a "messages" array.
     let params = push_received.params.unwrap();
-    let content = params["messages"][0]["content"].as_str()
+    let content = params["messages"][0]["content"]
+        .as_str()
         .or_else(|| params["content"].as_str()) // fallback for old push format
         .expect("push notification should contain content");
     assert_eq!(content, "live hello");
@@ -796,10 +1103,18 @@ async fn test_push_live_delivery_still_in_list_until_acked() {
     assert!(resp.error.is_none());
     let arr = resp.result.unwrap();
     let still_pending = arr.as_array().unwrap().iter().any(|m| m["id"] == msg_id);
-    assert!(still_pending, "live-delivered message must still appear in push.list until ack'd");
+    assert!(
+        still_pending,
+        "live-delivered message must still appear in push.list until ack'd"
+    );
 
     // After ack, it disappears.
-    let ack = call(&mut receiver, "push.ack", serde_json::json!({ "message_ids": [msg_id] })).await;
+    let ack = call(
+        &mut receiver,
+        "push.ack",
+        serde_json::json!({ "message_ids": [msg_id] }),
+    )
+    .await;
     assert!(ack.error.is_none());
     let resp2 = call(&mut receiver, "push.list", serde_json::json!({})).await;
     let arr2 = resp2.result.unwrap();
@@ -814,10 +1129,15 @@ async fn test_push_offline_delivery_flow() {
     let addr = start_server().await;
     let mut sender = connect(addr, "sender").await;
 
-    let resp = call(&mut sender, "push.send", serde_json::json!({
-        "to_agent_id": "late-receiver",
-        "content": "stored for later"
-    })).await;
+    let resp = call(
+        &mut sender,
+        "push.send",
+        serde_json::json!({
+            "to_agent_id": "late-receiver",
+            "content": "stored for later"
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let msg_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
 
@@ -829,18 +1149,32 @@ async fn test_push_offline_delivery_flow() {
     assert!(resp.error.is_none());
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
-    assert!(arr.iter().any(|m| m["id"] == msg_id), "stored message must appear in push.list");
-    assert_eq!(arr.iter().find(|m| m["id"] == msg_id).unwrap()["content"], "stored for later");
+    assert!(
+        arr.iter().any(|m| m["id"] == msg_id),
+        "stored message must appear in push.list"
+    );
+    assert_eq!(
+        arr.iter().find(|m| m["id"] == msg_id).unwrap()["content"],
+        "stored for later"
+    );
 
     // Ack it.
-    let resp = call(&mut receiver, "push.ack", serde_json::json!({ "message_ids": [&msg_id] })).await;
+    let resp = call(
+        &mut receiver,
+        "push.ack",
+        serde_json::json!({ "message_ids": [&msg_id] }),
+    )
+    .await;
     assert!(resp.error.is_none());
     assert_eq!(resp.result.unwrap()["acked"], 1);
 
     // push.list now empty.
     let resp = call(&mut receiver, "push.list", serde_json::json!({})).await;
     let arr = resp.result.unwrap();
-    assert!(!arr.as_array().unwrap().iter().any(|m| m["id"] == msg_id), "acked message must be gone");
+    assert!(
+        !arr.as_array().unwrap().iter().any(|m| m["id"] == msg_id),
+        "acked message must be gone"
+    );
 }
 
 // ── @mention notifications ────────────────────────────────────────────────────
@@ -855,51 +1189,71 @@ async fn test_at_mention_sends_push_notification() {
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
     // Create a topic.
-    let resp = call(&mut commenter, "topic.create", serde_json::json!({
-        "title": "Coordination",
-        "content": "Kicking off",
-        "creator_agent_id": "commenter",
-    })).await;
+    let resp = call(
+        &mut commenter,
+        "topic.create",
+        serde_json::json!({
+            "title": "Coordination",
+            "content": "Kicking off",
+            "creator_agent_id": "commenter",
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let topic_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Post a comment that @mentions receiver.
-    let resp = call(&mut commenter, "topic.comment", serde_json::json!({
-        "topic_id": topic_id,
-        "content": "Hey @receiver, please review this.",
-        "creator_agent_id": "commenter",
-    })).await;
+    let resp = call(
+        &mut commenter,
+        "topic.comment",
+        serde_json::json!({
+            "topic_id": topic_id,
+            "content": "Hey @receiver, please review this.",
+            "creator_agent_id": "commenter",
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
 
     // Receiver should get a push.notify WS message.
-    let push_msg = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            loop {
-                let raw = receiver.next().await.unwrap().unwrap();
-                if let Message::Text(t) = raw {
-                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.msg_type == MessageType::Push
-                        && msg.method.as_deref() == Some("push.notify")
-                    {
-                        return msg;
-                    }
+    let push_msg = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let raw = receiver.next().await.unwrap().unwrap();
+            if let Message::Text(t) = raw {
+                let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                if msg.msg_type == MessageType::Push && msg.method.as_deref() == Some("push.notify")
+                {
+                    return msg;
                 }
             }
         }
-    ).await.expect("timed out waiting for @mention push notification");
+    })
+    .await
+    .expect("timed out waiting for @mention push notification");
 
     let params = push_msg.params.unwrap();
     let content = params["messages"][0]["content"].as_str().unwrap();
-    assert!(content.contains("[notification]"), "notification marker missing: {content}");
-    assert!(content.contains(&topic_id), "topic id missing from notification: {content}");
-    assert!(content.contains("commenter"), "commenter attribution missing: {content}");
+    assert!(
+        content.contains("[notification]"),
+        "notification marker missing: {content}"
+    );
+    assert!(
+        content.contains(&topic_id),
+        "topic id missing from notification: {content}"
+    );
+    assert!(
+        content.contains("commenter"),
+        "commenter attribution missing: {content}"
+    );
 
     // The notification must also appear in push.list (unacked).
     let resp = call(&mut receiver, "push.list", serde_json::json!({})).await;
     let msgs = resp.result.unwrap();
     let found = msgs.as_array().unwrap().iter().any(|m| {
-        m["content"].as_str().map(|c| c.contains("[notification]")).unwrap_or(false)
+        m["content"]
+            .as_str()
+            .map(|c| c.contains("[notification]"))
+            .unwrap_or(false)
     });
     assert!(found, "notification must be in push.list until acked");
 }
@@ -912,39 +1266,49 @@ async fn test_at_mention_self_is_skipped() {
 
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
-    let resp = call(&mut agent, "topic.create", serde_json::json!({
-        "title": "Solo topic",
-        "content": "Thinking out loud",
-        "creator_agent_id": "self-agent",
-    })).await;
+    let resp = call(
+        &mut agent,
+        "topic.create",
+        serde_json::json!({
+            "title": "Solo topic",
+            "content": "Thinking out loud",
+            "creator_agent_id": "self-agent",
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let topic_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let resp = call(&mut agent, "topic.comment", serde_json::json!({
-        "topic_id": topic_id,
-        "content": "I am @self-agent and I note this.",
-        "creator_agent_id": "self-agent",
-    })).await;
+    let resp = call(
+        &mut agent,
+        "topic.comment",
+        serde_json::json!({
+            "topic_id": topic_id,
+            "content": "I am @self-agent and I note this.",
+            "creator_agent_id": "self-agent",
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
 
     // No push notification should arrive (give it a moment to confirm absence).
-    let got_notif = tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        async {
-            loop {
-                let raw = agent.next().await.unwrap().unwrap();
-                if let Message::Text(t) = raw {
-                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.msg_type == MessageType::Push
-                        && msg.method.as_deref() == Some("push.notify")
-                    {
-                        return true;
-                    }
+    let got_notif = tokio::time::timeout(std::time::Duration::from_millis(200), async {
+        loop {
+            let raw = agent.next().await.unwrap().unwrap();
+            if let Message::Text(t) = raw {
+                let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                if msg.msg_type == MessageType::Push && msg.method.as_deref() == Some("push.notify")
+                {
+                    return true;
                 }
             }
         }
-    ).await;
-    assert!(got_notif.is_err(), "self-mention must not produce a push notification");
+    })
+    .await;
+    assert!(
+        got_notif.is_err(),
+        "self-mention must not produce a push notification"
+    );
 }
 
 #[tokio::test]
@@ -957,36 +1321,58 @@ async fn test_at_mention_multiple_agents() {
 
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
-    let resp = call(&mut commenter, "topic.create", serde_json::json!({
-        "title": "Team topic",
-        "content": "Hello team",
-        "creator_agent_id": "tagger",
-    })).await;
+    let resp = call(
+        &mut commenter,
+        "topic.create",
+        serde_json::json!({
+            "title": "Team topic",
+            "content": "Hello team",
+            "creator_agent_id": "tagger",
+        }),
+    )
+    .await;
     let topic_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    call(&mut commenter, "topic.comment", serde_json::json!({
-        "topic_id": topic_id,
-        "content": "@alice and @bob, please check this.",
-        "creator_agent_id": "tagger",
-    })).await;
+    call(
+        &mut commenter,
+        "topic.comment",
+        serde_json::json!({
+            "topic_id": topic_id,
+            "content": "@alice and @bob, please check this.",
+            "creator_agent_id": "tagger",
+        }),
+    )
+    .await;
 
     // Both alice and bob should get notifications.
-    async fn wait_for_notify(ws: &mut (impl StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin)) -> bool {
+    async fn wait_for_notify(
+        ws: &mut (impl StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin),
+    ) -> bool {
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 let raw = ws.next().await.unwrap().unwrap();
                 if let Message::Text(t) = raw {
                     let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.msg_type == MessageType::Push && msg.method.as_deref() == Some("push.notify") {
+                    if msg.msg_type == MessageType::Push
+                        && msg.method.as_deref() == Some("push.notify")
+                    {
                         return true;
                     }
                 }
             }
-        }).await.is_ok()
+        })
+        .await
+        .is_ok()
     }
 
-    assert!(wait_for_notify(&mut alice).await, "alice must receive push notification");
-    assert!(wait_for_notify(&mut bob).await, "bob must receive push notification");
+    assert!(
+        wait_for_notify(&mut alice).await,
+        "alice must receive push notification"
+    );
+    assert!(
+        wait_for_notify(&mut bob).await,
+        "bob must receive push notification"
+    );
 }
 
 // ── task.split: chain, non-existent parent, empty subtasks ───────────────────
@@ -998,13 +1384,23 @@ async fn test_task_split_chain_enforced() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let r = call(&mut ws, "task.create", serde_json::json!({ "title": "Big Task" })).await;
+    let r = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Big Task" }),
+    )
+    .await;
     let parent_id = r.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let resp = call(&mut ws, "task.split", serde_json::json!({
-        "id": parent_id,
-        "subtasks": ["Sub1", "Sub2", "Sub3"]
-    })).await;
+    let resp = call(
+        &mut ws,
+        "task.split",
+        serde_json::json!({
+            "id": parent_id,
+            "subtasks": ["Sub1", "Sub2", "Sub3"]
+        }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let subs = resp.result.unwrap();
     let arr = subs.as_array().unwrap();
@@ -1032,11 +1428,19 @@ async fn test_task_split_nonexistent_parent_rejected() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "task.split", serde_json::json!({
-        "id": "does-not-exist",
-        "subtasks": ["Sub A"]
-    })).await;
-    assert!(resp.error.is_some(), "split on non-existent parent must return error");
+    let resp = call(
+        &mut ws,
+        "task.split",
+        serde_json::json!({
+            "id": "does-not-exist",
+            "subtasks": ["Sub A"]
+        }),
+    )
+    .await;
+    assert!(
+        resp.error.is_some(),
+        "split on non-existent parent must return error"
+    );
 }
 
 #[tokio::test]
@@ -1045,10 +1449,20 @@ async fn test_task_split_empty_subtasks_cancels_parent() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let r = call(&mut ws, "task.create", serde_json::json!({ "title": "Doomed Task" })).await;
+    let r = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Doomed Task" }),
+    )
+    .await;
     let id = r.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let resp = call(&mut ws, "task.split", serde_json::json!({ "id": id, "subtasks": [] })).await;
+    let resp = call(
+        &mut ws,
+        "task.split",
+        serde_json::json!({ "id": id, "subtasks": [] }),
+    )
+    .await;
     assert!(resp.error.is_none());
     assert_eq!(resp.result.unwrap().as_array().unwrap().len(), 0);
 
@@ -1059,7 +1473,11 @@ async fn test_task_split_empty_subtasks_cancels_parent() {
     // No new tasks created.
     let resp = call(&mut ws, "task.list", serde_json::json!({})).await;
     let arr = resp.result.unwrap();
-    assert_eq!(arr.as_array().unwrap().len(), 1, "only the original (cancelled) task exists");
+    assert_eq!(
+        arr.as_array().unwrap().len(),
+        1,
+        "only the original (cancelled) task exists"
+    );
 }
 
 // ── task.set_dependency: self-dep rejection and position ordering ─────────────
@@ -1069,13 +1487,23 @@ async fn test_set_dependency_self_dep_rejected() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let r = call(&mut ws, "task.create", serde_json::json!({ "title": "Self" })).await;
+    let r = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Self" }),
+    )
+    .await;
     let id = r.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let resp = call(&mut ws, "task.set_dependency", serde_json::json!({
-        "task_id": id,
-        "depends_on_id": id
-    })).await;
+    let resp = call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({
+            "task_id": id,
+            "depends_on_id": id
+        }),
+    )
+    .await;
     assert!(resp.error.is_some(), "self-dependency must be rejected");
 }
 
@@ -1092,13 +1520,32 @@ async fn test_set_dependency_positions_are_correct() {
     let rc = call(&mut ws, "task.create", serde_json::json!({ "title": "C" })).await;
     let id_c = rc.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    call(&mut ws, "task.set_dependency", serde_json::json!({ "task_id": id_b, "depends_on_id": id_a })).await;
-    call(&mut ws, "task.set_dependency", serde_json::json!({ "task_id": id_c, "depends_on_id": id_b })).await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({ "task_id": id_b, "depends_on_id": id_a }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({ "task_id": id_c, "depends_on_id": id_b }),
+    )
+    .await;
 
     // Read positions via task.get and verify strict ordering: pos[A] < pos[B] < pos[C].
-    let ta = call(&mut ws, "task.get", serde_json::json!({ "id": id_a })).await.result.unwrap();
-    let tb = call(&mut ws, "task.get", serde_json::json!({ "id": id_b })).await.result.unwrap();
-    let tc = call(&mut ws, "task.get", serde_json::json!({ "id": id_c })).await.result.unwrap();
+    let ta = call(&mut ws, "task.get", serde_json::json!({ "id": id_a }))
+        .await
+        .result
+        .unwrap();
+    let tb = call(&mut ws, "task.get", serde_json::json!({ "id": id_b }))
+        .await
+        .result
+        .unwrap();
+    let tc = call(&mut ws, "task.get", serde_json::json!({ "id": id_c }))
+        .await
+        .result
+        .unwrap();
 
     let pos_a = ta["position"].as_f64().unwrap();
     let pos_b = tb["position"].as_f64().unwrap();
@@ -1123,27 +1570,57 @@ async fn test_get_next_fan_in_requires_all_deps_done() {
     let rc = call(&mut ws, "task.create", serde_json::json!({ "title": "C" })).await;
     let id_c = rc.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    call(&mut ws, "task.set_dependency", serde_json::json!({ "task_id": id_c, "depends_on_id": id_a })).await;
-    call(&mut ws, "task.set_dependency", serde_json::json!({ "task_id": id_c, "depends_on_id": id_b })).await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({ "task_id": id_c, "depends_on_id": id_a }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({ "task_id": id_c, "depends_on_id": id_b }),
+    )
+    .await;
 
     // Complete A first.
     let resp = call(&mut ws, "task.get_next", serde_json::json!({})).await;
     let first = resp.result.unwrap();
-    assert!(first["id"] == id_a || first["id"] == id_b, "first should be A or B");
+    assert!(
+        first["id"] == id_a || first["id"] == id_b,
+        "first should be A or B"
+    );
     let first_id = first["id"].as_str().unwrap().to_string();
-    let second_id = if first_id == id_a { id_b.clone() } else { id_a.clone() };
+    let second_id = if first_id == id_a {
+        id_b.clone()
+    } else {
+        id_a.clone()
+    };
 
     // Complete first dep. next_task from auto-claim should be the OTHER dep (not C).
-    let resp = call(&mut ws, "task.complete", serde_json::json!({ "id": first_id })).await;
+    let resp = call(
+        &mut ws,
+        "task.complete",
+        serde_json::json!({ "id": first_id }),
+    )
+    .await;
     let next = resp.result.unwrap()["next_task"].clone();
     // The auto-claimed next should be the second dep (not C, since C still has one unmet dep).
     assert!(!next.is_null(), "auto-claim should find the second dep");
     assert_eq!(next["id"], second_id, "second dep should be claimed, not C");
 
     // Now complete the second dep. C should become available as next_task.
-    let resp = call(&mut ws, "task.complete", serde_json::json!({ "id": second_id })).await;
+    let resp = call(
+        &mut ws,
+        "task.complete",
+        serde_json::json!({ "id": second_id }),
+    )
+    .await;
     let next = resp.result.unwrap()["next_task"].clone();
-    assert!(!next.is_null(), "C should now be auto-claimed after both deps done");
+    assert!(
+        !next.is_null(),
+        "C should now be auto-claimed after both deps done"
+    );
     assert_eq!(next["id"], id_c);
 }
 
@@ -1154,42 +1631,110 @@ async fn test_get_next_diamond_dependency() {
 
     // Diamond: root → A, root → B, C → A, C → B
     // Order: Root first, then A and B (both unlocked), then C (both A and B must be done).
-    let r_root = call(&mut ws, "task.create", serde_json::json!({ "title": "Root" })).await;
+    let r_root = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Root" }),
+    )
+    .await;
     let id_root = r_root.result.unwrap()["id"].as_str().unwrap().to_string();
-    let r_a = call(&mut ws, "task.create", serde_json::json!({ "title": "Mid-A" })).await;
+    let r_a = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Mid-A" }),
+    )
+    .await;
     let id_a = r_a.result.unwrap()["id"].as_str().unwrap().to_string();
-    let r_b = call(&mut ws, "task.create", serde_json::json!({ "title": "Mid-B" })).await;
+    let r_b = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Mid-B" }),
+    )
+    .await;
     let id_b = r_b.result.unwrap()["id"].as_str().unwrap().to_string();
-    let r_c = call(&mut ws, "task.create", serde_json::json!({ "title": "Final-C" })).await;
+    let r_c = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Final-C" }),
+    )
+    .await;
     let id_c = r_c.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    call(&mut ws, "task.set_dependency", serde_json::json!({ "task_id": id_a, "depends_on_id": id_root })).await;
-    call(&mut ws, "task.set_dependency", serde_json::json!({ "task_id": id_b, "depends_on_id": id_root })).await;
-    call(&mut ws, "task.set_dependency", serde_json::json!({ "task_id": id_c, "depends_on_id": id_a })).await;
-    call(&mut ws, "task.set_dependency", serde_json::json!({ "task_id": id_c, "depends_on_id": id_b })).await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({ "task_id": id_a, "depends_on_id": id_root }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({ "task_id": id_b, "depends_on_id": id_root }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({ "task_id": id_c, "depends_on_id": id_a }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        serde_json::json!({ "task_id": id_c, "depends_on_id": id_b }),
+    )
+    .await;
 
     // Only Root is available now.
     let resp = call(&mut ws, "task.get_next", serde_json::json!({})).await;
     assert_eq!(resp.result.unwrap()["id"], id_root, "Root should be first");
 
     // Complete Root. Mid-A or Mid-B should be auto-claimed (whichever comes first by position).
-    let resp = call(&mut ws, "task.complete", serde_json::json!({ "id": id_root })).await;
+    let resp = call(
+        &mut ws,
+        "task.complete",
+        serde_json::json!({ "id": id_root }),
+    )
+    .await;
     let next = resp.result.unwrap()["next_task"].clone();
-    assert!(!next.is_null(), "a mid task should be available after Root done");
+    assert!(
+        !next.is_null(),
+        "a mid task should be available after Root done"
+    );
     let first_mid = next["id"].as_str().unwrap().to_string();
-    assert!(first_mid == id_a || first_mid == id_b, "first mid should be A or B");
-    let second_mid = if first_mid == id_a { id_b.clone() } else { id_a.clone() };
+    assert!(
+        first_mid == id_a || first_mid == id_b,
+        "first mid should be A or B"
+    );
+    let second_mid = if first_mid == id_a {
+        id_b.clone()
+    } else {
+        id_a.clone()
+    };
 
     // Complete first mid. auto-claim grabs second mid (C still has unmet dep).
-    let resp = call(&mut ws, "task.complete", serde_json::json!({ "id": first_mid })).await;
+    let resp = call(
+        &mut ws,
+        "task.complete",
+        serde_json::json!({ "id": first_mid }),
+    )
+    .await;
     let next = resp.result.unwrap()["next_task"].clone();
     assert!(!next.is_null(), "second mid should be available");
     assert_eq!(next["id"], second_mid, "second mid should be next, not C");
 
     // Complete second mid. Now C is available.
-    let resp = call(&mut ws, "task.complete", serde_json::json!({ "id": second_mid })).await;
+    let resp = call(
+        &mut ws,
+        "task.complete",
+        serde_json::json!({ "id": second_mid }),
+    )
+    .await;
     let next = resp.result.unwrap()["next_task"].clone();
-    assert!(!next.is_null(), "C should be available after both mids done");
+    assert!(
+        !next.is_null(),
+        "C should be available after both mids done"
+    );
     assert_eq!(next["id"], id_c, "C is the final task");
 }
 
@@ -1202,13 +1747,21 @@ async fn test_get_next_skips_in_progress_tasks() {
     let mut ws2 = connect(addr, "agent-2").await;
 
     // Only one task exists; agent-1 claims it.
-    call(&mut ws1, "task.create", serde_json::json!({ "title": "Claimed Task" })).await;
+    call(
+        &mut ws1,
+        "task.create",
+        serde_json::json!({ "title": "Claimed Task" }),
+    )
+    .await;
     call(&mut ws1, "task.get_next", serde_json::json!({})).await;
 
     // agent-2 calls get_next — nothing is available (task is in-progress).
     let resp = call(&mut ws2, "task.get_next", serde_json::json!({})).await;
     assert!(resp.error.is_none());
-    assert!(resp.result.is_none(), "in-progress task should not be returned to another agent");
+    assert!(
+        resp.result.is_none(),
+        "in-progress task should not be returned to another agent"
+    );
 }
 
 #[tokio::test]
@@ -1216,15 +1769,28 @@ async fn test_get_next_skips_blocked_tasks() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let r = call(&mut ws, "task.create", serde_json::json!({ "title": "Blocked Task" })).await;
+    let r = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Blocked Task" }),
+    )
+    .await;
     let id = r.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Block the task.
-    call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "blocked" })).await;
+    call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id, "status": "blocked" }),
+    )
+    .await;
 
     let resp = call(&mut ws, "task.get_next", serde_json::json!({})).await;
     assert!(resp.error.is_none());
-    assert!(resp.result.is_none(), "blocked task should not be returned by get_next");
+    assert!(
+        resp.result.is_none(),
+        "blocked task should not be returned by get_next"
+    );
 }
 
 #[tokio::test]
@@ -1233,19 +1799,42 @@ async fn test_get_next_skips_cancelled_and_done_tasks() {
     let mut ws = connect(addr, "agent-1").await;
 
     // Create two tasks: one cancelled, one done (via in-progress→done path).
-    let r1 = call(&mut ws, "task.create", serde_json::json!({ "title": "Cancelled" })).await;
+    let r1 = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Cancelled" }),
+    )
+    .await;
     let id1 = r1.result.unwrap()["id"].as_str().unwrap().to_string();
-    call(&mut ws, "task.update", serde_json::json!({ "id": id1, "status": "cancelled" })).await;
+    call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id1, "status": "cancelled" }),
+    )
+    .await;
 
-    let r2 = call(&mut ws, "task.create", serde_json::json!({ "title": "Done" })).await;
+    let r2 = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Done" }),
+    )
+    .await;
     let id2 = r2.result.unwrap()["id"].as_str().unwrap().to_string();
     call(&mut ws, "task.get_next", serde_json::json!({})).await; // claims Done task
-    call(&mut ws, "task.update", serde_json::json!({ "id": id2, "status": "done" })).await;
+    call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id2, "status": "done" }),
+    )
+    .await;
 
     // No pending tasks remain — get_next returns null.
     let resp = call(&mut ws, "task.get_next", serde_json::json!({})).await;
     assert!(resp.error.is_none());
-    assert!(resp.result.is_none(), "cancelled/done tasks should not be returned by get_next");
+    assert!(
+        resp.result.is_none(),
+        "cancelled/done tasks should not be returned by get_next"
+    );
 }
 
 #[tokio::test]
@@ -1254,21 +1843,49 @@ async fn test_get_next_returns_pending_after_skipping_non_pending() {
     let mut ws = connect(addr, "agent-1").await;
 
     // Create: one blocked, one cancelled, one pending.
-    let r1 = call(&mut ws, "task.create", serde_json::json!({ "title": "Blocked" })).await;
+    let r1 = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Blocked" }),
+    )
+    .await;
     let id1 = r1.result.unwrap()["id"].as_str().unwrap().to_string();
-    call(&mut ws, "task.update", serde_json::json!({ "id": id1, "status": "blocked" })).await;
+    call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id1, "status": "blocked" }),
+    )
+    .await;
 
-    let r2 = call(&mut ws, "task.create", serde_json::json!({ "title": "Cancelled" })).await;
+    let r2 = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Cancelled" }),
+    )
+    .await;
     let id2 = r2.result.unwrap()["id"].as_str().unwrap().to_string();
-    call(&mut ws, "task.update", serde_json::json!({ "id": id2, "status": "cancelled" })).await;
+    call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id2, "status": "cancelled" }),
+    )
+    .await;
 
-    call(&mut ws, "task.create", serde_json::json!({ "title": "The One" })).await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "The One" }),
+    )
+    .await;
 
     // get_next should skip blocked and cancelled, return "The One".
     let resp = call(&mut ws, "task.get_next", serde_json::json!({})).await;
     assert!(resp.error.is_none());
     let task = resp.result.unwrap();
-    assert_eq!(task["title"], "The One", "should skip non-pending tasks and return the pending one");
+    assert_eq!(
+        task["title"], "The One",
+        "should skip non-pending tasks and return the pending one"
+    );
     assert_eq!(task["status"], "in-progress");
 }
 
@@ -1282,17 +1899,32 @@ async fn test_task_update_valid_transitions() {
     // pending → blocked
     let r = call(&mut ws, "task.create", serde_json::json!({ "title": "T" })).await;
     let id = r.result.unwrap()["id"].as_str().unwrap().to_string();
-    let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "blocked" })).await;
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id, "status": "blocked" }),
+    )
+    .await;
     assert!(resp.error.is_none(), "pending→blocked should succeed");
     assert_eq!(resp.result.unwrap()["status"], "blocked");
 
     // blocked → pending
-    let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "pending" })).await;
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id, "status": "pending" }),
+    )
+    .await;
     assert!(resp.error.is_none(), "blocked→pending should succeed");
     assert_eq!(resp.result.unwrap()["status"], "pending");
 
     // pending → cancelled
-    let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "cancelled" })).await;
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id, "status": "cancelled" }),
+    )
+    .await;
     assert!(resp.error.is_none(), "pending→cancelled should succeed");
     assert_eq!(resp.result.unwrap()["status"], "cancelled");
 
@@ -1300,7 +1932,12 @@ async fn test_task_update_valid_transitions() {
     let r2 = call(&mut ws, "task.create", serde_json::json!({ "title": "T2" })).await;
     let id2 = r2.result.unwrap()["id"].as_str().unwrap().to_string();
     call(&mut ws, "task.get_next", serde_json::json!({})).await; // makes T2 in-progress
-    let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id2, "status": "done" })).await;
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id2, "status": "done" }),
+    )
+    .await;
     assert!(resp.error.is_none(), "in-progress→done should succeed");
     assert_eq!(resp.result.unwrap()["status"], "done");
 }
@@ -1313,13 +1950,26 @@ async fn test_task_update_invalid_transitions() {
     // pending → done is INVALID
     let r = call(&mut ws, "task.create", serde_json::json!({ "title": "T" })).await;
     let id = r.result.unwrap()["id"].as_str().unwrap().to_string();
-    let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "done" })).await;
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id, "status": "done" }),
+    )
+    .await;
     assert!(resp.error.is_some(), "pending→done should be rejected");
 
     // in-progress → pending is VALID (operator reset)
     call(&mut ws, "task.get_next", serde_json::json!({})).await;
-    let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "pending" })).await;
-    assert!(resp.error.is_none(), "in-progress→pending should be allowed (operator reset)");
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id, "status": "pending" }),
+    )
+    .await;
+    assert!(
+        resp.error.is_none(),
+        "in-progress→pending should be allowed (operator reset)"
+    );
 }
 
 #[tokio::test]
@@ -1328,25 +1978,60 @@ async fn test_task_update_terminal_states_reject_all_transitions() {
     let mut ws = connect(addr, "agent-1").await;
 
     // Make a task done: pending → in-progress → done.
-    let r = call(&mut ws, "task.create", serde_json::json!({ "title": "Done Task" })).await;
+    let r = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Done Task" }),
+    )
+    .await;
     let id = r.result.unwrap()["id"].as_str().unwrap().to_string();
     call(&mut ws, "task.get_next", serde_json::json!({})).await;
-    call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "done" })).await;
+    call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id, "status": "done" }),
+    )
+    .await;
 
     // done → pending
-    let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "pending" })).await;
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id, "status": "pending" }),
+    )
+    .await;
     assert!(resp.error.is_some(), "done→pending should be rejected");
 
     // done → cancelled
-    let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id, "status": "cancelled" })).await;
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id, "status": "cancelled" }),
+    )
+    .await;
     assert!(resp.error.is_some(), "done→cancelled should be rejected");
 
     // Make a task cancelled, verify it also rejects transitions.
-    let r2 = call(&mut ws, "task.create", serde_json::json!({ "title": "Cancelled Task" })).await;
+    let r2 = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Cancelled Task" }),
+    )
+    .await;
     let id2 = r2.result.unwrap()["id"].as_str().unwrap().to_string();
-    call(&mut ws, "task.update", serde_json::json!({ "id": id2, "status": "cancelled" })).await;
+    call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id2, "status": "cancelled" }),
+    )
+    .await;
 
-    let resp = call(&mut ws, "task.update", serde_json::json!({ "id": id2, "status": "pending" })).await;
+    let resp = call(
+        &mut ws,
+        "task.update",
+        serde_json::json!({ "id": id2, "status": "pending" }),
+    )
+    .await;
     assert!(resp.error.is_some(), "cancelled→pending should be rejected");
 }
 
@@ -1366,8 +2051,16 @@ async fn test_task_create_whitespace_title_rejected() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "task.create", serde_json::json!({ "title": "   " })).await;
-    assert!(resp.error.is_some(), "whitespace-only title should be rejected");
+    let resp = call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "   " }),
+    )
+    .await;
+    assert!(
+        resp.error.is_some(),
+        "whitespace-only title should be rejected"
+    );
 }
 
 #[tokio::test]
@@ -1375,8 +2068,16 @@ async fn test_task_get_unknown_id_returns_error() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    let resp = call(&mut ws, "task.get", serde_json::json!({ "id": "does-not-exist" })).await;
-    assert!(resp.error.is_some(), "unknown task ID should return an error, not null");
+    let resp = call(
+        &mut ws,
+        "task.get",
+        serde_json::json!({ "id": "does-not-exist" }),
+    )
+    .await;
+    assert!(
+        resp.error.is_some(),
+        "unknown task ID should return an error, not null"
+    );
     assert!(resp.result.is_none());
 }
 
@@ -1388,12 +2089,27 @@ async fn test_task_list_status_filter() {
     let mut ws = connect(addr, "agent-1").await;
 
     // Create two tasks; claim one (making it in-progress).
-    call(&mut ws, "task.create", serde_json::json!({ "title": "Pending Task" })).await;
-    call(&mut ws, "task.create", serde_json::json!({ "title": "In Progress Task" })).await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Pending Task" }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "In Progress Task" }),
+    )
+    .await;
     call(&mut ws, "task.get_next", serde_json::json!({})).await; // claims one
 
     // Filter by pending — should return exactly one.
-    let resp = call(&mut ws, "task.list", serde_json::json!({ "status": "pending" })).await;
+    let resp = call(
+        &mut ws,
+        "task.list",
+        serde_json::json!({ "status": "pending" }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
@@ -1401,7 +2117,12 @@ async fn test_task_list_status_filter() {
     assert_eq!(arr[0]["status"], "pending");
 
     // Filter by in-progress — should return exactly one.
-    let resp = call(&mut ws, "task.list", serde_json::json!({ "status": "in-progress" })).await;
+    let resp = call(
+        &mut ws,
+        "task.list",
+        serde_json::json!({ "status": "in-progress" }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
@@ -1418,24 +2139,57 @@ async fn test_task_list_tag_filter() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-1").await;
 
-    call(&mut ws, "task.create", serde_json::json!({ "title": "Backend Task", "tags": ["backend"] })).await;
-    call(&mut ws, "task.create", serde_json::json!({ "title": "Frontend Task", "tags": ["frontend"] })).await;
-    call(&mut ws, "task.create", serde_json::json!({ "title": "Full Stack", "tags": ["backend", "frontend"] })).await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Backend Task", "tags": ["backend"] }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Frontend Task", "tags": ["frontend"] }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Full Stack", "tags": ["backend", "frontend"] }),
+    )
+    .await;
 
     // Filter by "backend" — should match tasks 1 and 3.
-    let resp = call(&mut ws, "task.list", serde_json::json!({ "tag": "backend" })).await;
+    let resp = call(
+        &mut ws,
+        "task.list",
+        serde_json::json!({ "tag": "backend" }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
     assert_eq!(arr.len(), 2, "expected 2 backend tasks");
-    assert!(arr.iter().all(|t| t["tags"].as_array().unwrap().contains(&serde_json::json!("backend"))));
+    assert!(arr.iter().all(|t| t["tags"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("backend"))));
 
     // Filter by "frontend" — should match tasks 2 and 3.
-    let resp = call(&mut ws, "task.list", serde_json::json!({ "tag": "frontend" })).await;
+    let resp = call(
+        &mut ws,
+        "task.list",
+        serde_json::json!({ "tag": "frontend" }),
+    )
+    .await;
     assert_eq!(resp.result.unwrap().as_array().unwrap().len(), 2);
 
     // Filter by non-existent tag — empty result.
-    let resp = call(&mut ws, "task.list", serde_json::json!({ "tag": "nonexistent" })).await;
+    let resp = call(
+        &mut ws,
+        "task.list",
+        serde_json::json!({ "tag": "nonexistent" }),
+    )
+    .await;
     assert_eq!(resp.result.unwrap().as_array().unwrap().len(), 0);
 }
 
@@ -1446,14 +2200,29 @@ async fn test_task_list_agent_filter() {
     let mut ws2 = connect(addr, "agent-beta").await;
 
     // Create two tasks — each agent claims one.
-    call(&mut ws1, "task.create", serde_json::json!({ "title": "Alpha's Task" })).await;
-    call(&mut ws1, "task.create", serde_json::json!({ "title": "Beta's Task" })).await;
+    call(
+        &mut ws1,
+        "task.create",
+        serde_json::json!({ "title": "Alpha's Task" }),
+    )
+    .await;
+    call(
+        &mut ws1,
+        "task.create",
+        serde_json::json!({ "title": "Beta's Task" }),
+    )
+    .await;
 
     call(&mut ws1, "task.get_next", serde_json::json!({})).await; // agent-alpha claims first
     call(&mut ws2, "task.get_next", serde_json::json!({})).await; // agent-beta claims second
 
     // Filter by agent-alpha — exactly one task.
-    let resp = call(&mut ws1, "task.list", serde_json::json!({ "assigned_agent_id": "agent-alpha" })).await;
+    let resp = call(
+        &mut ws1,
+        "task.list",
+        serde_json::json!({ "assigned_agent_id": "agent-alpha" }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
@@ -1461,7 +2230,12 @@ async fn test_task_list_agent_filter() {
     assert_eq!(arr[0]["assigned_agent_id"], "agent-alpha");
 
     // Filter by agent-beta — exactly one task.
-    let resp = call(&mut ws1, "task.list", serde_json::json!({ "assigned_agent_id": "agent-beta" })).await;
+    let resp = call(
+        &mut ws1,
+        "task.list",
+        serde_json::json!({ "assigned_agent_id": "agent-beta" }),
+    )
+    .await;
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
     assert_eq!(arr.len(), 1);
@@ -1474,31 +2248,77 @@ async fn test_task_list_combined_filter() {
     let mut ws = connect(addr, "agent-1").await;
 
     // Create tasks: two backend (one will be claimed as in-progress), one frontend (stays pending).
-    call(&mut ws, "task.create", serde_json::json!({ "title": "Backend A", "tags": ["backend"] })).await;
-    call(&mut ws, "task.create", serde_json::json!({ "title": "Backend B", "tags": ["backend"] })).await;
-    call(&mut ws, "task.create", serde_json::json!({ "title": "Frontend A", "tags": ["frontend"] })).await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Backend A", "tags": ["backend"] }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Backend B", "tags": ["backend"] }),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.create",
+        serde_json::json!({ "title": "Frontend A", "tags": ["frontend"] }),
+    )
+    .await;
 
     // Claim one backend task — it becomes in-progress.
-    call(&mut ws, "task.get_next", serde_json::json!({ "tag": "backend" })).await;
+    call(
+        &mut ws,
+        "task.get_next",
+        serde_json::json!({ "tag": "backend" }),
+    )
+    .await;
 
     // status=pending + tag=backend → 1 (Backend B is still pending)
-    let resp = call(&mut ws, "task.list", serde_json::json!({ "status": "pending", "tag": "backend" })).await;
+    let resp = call(
+        &mut ws,
+        "task.list",
+        serde_json::json!({ "status": "pending", "tag": "backend" }),
+    )
+    .await;
     assert!(resp.error.is_none());
     let arr = resp.result.unwrap();
     let arr = arr.as_array().unwrap();
     assert_eq!(arr.len(), 1, "one backend task is still pending");
-    assert_eq!(arr[0]["tags"].as_array().unwrap().contains(&serde_json::json!("backend")), true);
+    assert_eq!(
+        arr[0]["tags"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("backend")),
+        true
+    );
 
     // status=in-progress + tag=backend → 1 (Backend A was just claimed)
-    let resp = call(&mut ws, "task.list", serde_json::json!({ "status": "in-progress", "tag": "backend" })).await;
+    let resp = call(
+        &mut ws,
+        "task.list",
+        serde_json::json!({ "status": "in-progress", "tag": "backend" }),
+    )
+    .await;
     assert_eq!(resp.result.unwrap().as_array().unwrap().len(), 1);
 
     // status=pending + tag=frontend → 1 (Frontend A, untouched)
-    let resp = call(&mut ws, "task.list", serde_json::json!({ "status": "pending", "tag": "frontend" })).await;
+    let resp = call(
+        &mut ws,
+        "task.list",
+        serde_json::json!({ "status": "pending", "tag": "frontend" }),
+    )
+    .await;
     assert_eq!(resp.result.unwrap().as_array().unwrap().len(), 1);
 
     // status=in-progress + tag=frontend → 0
-    let resp = call(&mut ws, "task.list", serde_json::json!({ "status": "in-progress", "tag": "frontend" })).await;
+    let resp = call(
+        &mut ws,
+        "task.list",
+        serde_json::json!({ "status": "in-progress", "tag": "frontend" }),
+    )
+    .await;
     assert_eq!(resp.result.unwrap().as_array().unwrap().len(), 0);
 }
 
@@ -1512,28 +2332,37 @@ async fn test_task_assign_on_register_when_task_pending() {
     let mut creator = connect(addr, "creator").await;
     let mut agent = connect(addr, "agent-1").await;
 
-    call(&mut creator, "task.create", serde_json::json!({ "title": "Dispatch me" })).await;
+    call(
+        &mut creator,
+        "task.create",
+        serde_json::json!({ "title": "Dispatch me" }),
+    )
+    .await;
 
     // Register the agent — server should immediately dispatch the pending task.
-    call(&mut agent, "agent.register", serde_json::json!({
-        "id": "agent-1", "name": "Agent 1", "tags": [], "capacity_max": 1
-    })).await;
+    call(
+        &mut agent,
+        "agent.register",
+        serde_json::json!({
+            "id": "agent-1", "name": "Agent 1", "tags": [], "capacity_max": 1
+        }),
+    )
+    .await;
 
     // Agent should receive a task.assign push.
-    let assign = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            loop {
-                let raw = agent.next().await.unwrap().unwrap();
-                if let Message::Text(t) = raw {
-                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.method.as_deref() == Some("task.assign") {
-                        return msg;
-                    }
+    let assign = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let raw = agent.next().await.unwrap().unwrap();
+            if let Message::Text(t) = raw {
+                let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                if msg.method.as_deref() == Some("task.assign") {
+                    return msg;
                 }
             }
         }
-    ).await.expect("timed out waiting for task.assign");
+    })
+    .await
+    .expect("timed out waiting for task.assign");
 
     let task = assign.params.unwrap()["task"].clone();
     assert_eq!(task["title"], "Dispatch me");
@@ -1549,30 +2378,39 @@ async fn test_task_assign_on_task_create_when_agent_idle() {
     let mut creator = connect(addr, "creator").await;
     let mut agent = connect(addr, "agent-1").await;
 
-    call(&mut agent, "agent.register", serde_json::json!({
-        "id": "agent-1", "name": "Agent 1", "tags": [], "capacity_max": 1
-    })).await;
+    call(
+        &mut agent,
+        "agent.register",
+        serde_json::json!({
+            "id": "agent-1", "name": "Agent 1", "tags": [], "capacity_max": 1
+        }),
+    )
+    .await;
 
     // Small delay to ensure registration is processed.
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-    call(&mut creator, "task.create", serde_json::json!({ "title": "Instant dispatch" })).await;
+    call(
+        &mut creator,
+        "task.create",
+        serde_json::json!({ "title": "Instant dispatch" }),
+    )
+    .await;
 
     // Agent should receive task.assign without polling.
-    let assign = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            loop {
-                let raw = agent.next().await.unwrap().unwrap();
-                if let Message::Text(t) = raw {
-                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.method.as_deref() == Some("task.assign") {
-                        return msg;
-                    }
+    let assign = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let raw = agent.next().await.unwrap().unwrap();
+            if let Message::Text(t) = raw {
+                let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                if msg.method.as_deref() == Some("task.assign") {
+                    return msg;
                 }
             }
         }
-    ).await.expect("timed out waiting for task.assign");
+    })
+    .await
+    .expect("timed out waiting for task.assign");
 
     assert_eq!(assign.params.unwrap()["task"]["title"], "Instant dispatch");
 }
@@ -1589,51 +2427,81 @@ async fn test_agent_status_idle_triggers_dispatch() {
     let mut creator = connect(addr, "creator").await;
     let mut ws = connect(addr, "agent-1").await;
 
-    call(&mut ws, "agent.register", serde_json::json!({
-        "id": "agent-1", "name": "Agent 1", "tags": [], "capacity_max": 1
-    })).await;
+    call(
+        &mut ws,
+        "agent.register",
+        serde_json::json!({
+            "id": "agent-1", "name": "Agent 1", "tags": [], "capacity_max": 1
+        }),
+    )
+    .await;
 
     // Task 1 is created and immediately dispatched to the idle agent.
-    call(&mut creator, "task.create", serde_json::json!({ "title": "Task 1" })).await;
+    call(
+        &mut creator,
+        "task.create",
+        serde_json::json!({ "title": "Task 1" }),
+    )
+    .await;
 
     // Receive task.assign for Task 1.
-    let assign1 = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            loop {
-                let raw = ws.next().await.unwrap().unwrap();
-                if let Message::Text(t) = raw {
-                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.method.as_deref() == Some("task.assign") { return msg; }
+    let assign1 = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let raw = ws.next().await.unwrap().unwrap();
+            if let Message::Text(t) = raw {
+                let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                if msg.method.as_deref() == Some("task.assign") {
+                    return msg;
                 }
             }
         }
-    ).await.expect("timed out waiting for first task.assign");
+    })
+    .await
+    .expect("timed out waiting for first task.assign");
 
-    let task1_id = assign1.params.unwrap()["task"]["id"].as_str().unwrap().to_string();
+    let task1_id = assign1.params.unwrap()["task"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Complete Task 1 (no pending tasks yet, so next_task=null).
-    call(&mut ws, "task.complete", serde_json::json!({ "id": task1_id, "result": "ok" })).await;
+    call(
+        &mut ws,
+        "task.complete",
+        serde_json::json!({ "id": task1_id, "result": "ok" }),
+    )
+    .await;
 
     // Create Task 2 now. Registry still has active_tasks=1, so try_dispatch won't fire.
-    call(&mut creator, "task.create", serde_json::json!({ "title": "Task 2" })).await;
+    call(
+        &mut creator,
+        "task.create",
+        serde_json::json!({ "title": "Task 2" }),
+    )
+    .await;
 
     // Agent reports idle — triggers dispatch of Task 2.
-    call(&mut ws, "agent.status", serde_json::json!({ "active_tasks": 0 })).await;
+    call(
+        &mut ws,
+        "agent.status",
+        serde_json::json!({ "active_tasks": 0 }),
+    )
+    .await;
 
     // Server dispatches Task 2.
-    let assign2 = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            loop {
-                let raw = ws.next().await.unwrap().unwrap();
-                if let Message::Text(t) = raw {
-                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.method.as_deref() == Some("task.assign") { return msg; }
+    let assign2 = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let raw = ws.next().await.unwrap().unwrap();
+            if let Message::Text(t) = raw {
+                let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                if msg.method.as_deref() == Some("task.assign") {
+                    return msg;
                 }
             }
         }
-    ).await.expect("timed out waiting for second task.assign");
+    })
+    .await
+    .expect("timed out waiting for second task.assign");
 
     assert_eq!(assign2.params.unwrap()["task"]["title"], "Task 2");
 }
@@ -1646,25 +2514,36 @@ async fn test_untagged_task_dispatched_to_tagged_agent() {
     let mut creator = connect(addr, "creator").await;
     let mut agent = connect(addr, "agent-rust").await;
 
-    call(&mut agent, "agent.register", serde_json::json!({
-        "id": "agent-rust", "name": "Rust Agent", "tags": ["rust"], "capacity_max": 1
-    })).await;
+    call(
+        &mut agent,
+        "agent.register",
+        serde_json::json!({
+            "id": "agent-rust", "name": "Rust Agent", "tags": ["rust"], "capacity_max": 1
+        }),
+    )
+    .await;
 
     // Task with NO tags — should be claimable by any agent.
-    call(&mut creator, "task.create", serde_json::json!({ "title": "Untagged work" })).await;
+    call(
+        &mut creator,
+        "task.create",
+        serde_json::json!({ "title": "Untagged work" }),
+    )
+    .await;
 
-    let assign = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            loop {
-                let raw = agent.next().await.unwrap().unwrap();
-                if let Message::Text(t) = raw {
-                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.method.as_deref() == Some("task.assign") { return msg; }
+    let assign = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let raw = agent.next().await.unwrap().unwrap();
+            if let Message::Text(t) = raw {
+                let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                if msg.method.as_deref() == Some("task.assign") {
+                    return msg;
                 }
             }
         }
-    ).await.expect("timed out: tagged agent should receive untagged task");
+    })
+    .await
+    .expect("timed out: tagged agent should receive untagged task");
 
     assert_eq!(assign.params.unwrap()["task"]["title"], "Untagged work");
 }
@@ -1676,30 +2555,43 @@ async fn test_tagged_task_not_dispatched_to_wrong_agent() {
     let mut creator = connect(addr, "creator").await;
     let mut rust_agent = connect(addr, "agent-rust").await;
 
-    call(&mut rust_agent, "agent.register", serde_json::json!({
-        "id": "agent-rust", "name": "Rust Agent", "tags": ["rust"], "capacity_max": 1
-    })).await;
+    call(
+        &mut rust_agent,
+        "agent.register",
+        serde_json::json!({
+            "id": "agent-rust", "name": "Rust Agent", "tags": ["rust"], "capacity_max": 1
+        }),
+    )
+    .await;
 
     // Task explicitly tagged "python" — should NOT go to "rust" agent.
-    call(&mut creator, "task.create", serde_json::json!({
-        "title": "Python work", "tags": ["python"]
-    })).await;
+    call(
+        &mut creator,
+        "task.create",
+        serde_json::json!({
+            "title": "Python work", "tags": ["python"]
+        }),
+    )
+    .await;
 
     // Wait briefly; rust agent should NOT receive task.assign.
-    let result = tokio::time::timeout(
-        std::time::Duration::from_millis(300),
-        async {
-            loop {
-                let raw = rust_agent.next().await.unwrap().unwrap();
-                if let Message::Text(t) = raw {
-                    let msg: ApiMessage = serde_json::from_str(&t).unwrap();
-                    if msg.method.as_deref() == Some("task.assign") { return true; }
+    let result = tokio::time::timeout(std::time::Duration::from_millis(300), async {
+        loop {
+            let raw = rust_agent.next().await.unwrap().unwrap();
+            if let Message::Text(t) = raw {
+                let msg: ApiMessage = serde_json::from_str(&t).unwrap();
+                if msg.method.as_deref() == Some("task.assign") {
+                    return true;
                 }
             }
         }
-    ).await;
+    })
+    .await;
 
-    assert!(result.is_err(), "rust agent should NOT receive python-tagged task");
+    assert!(
+        result.is_err(),
+        "rust agent should NOT receive python-tagged task"
+    );
 }
 
 // ── Internal test helpers ─────────────────────────────────────────────────────

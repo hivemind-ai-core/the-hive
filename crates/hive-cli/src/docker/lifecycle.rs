@@ -4,12 +4,11 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bollard::{
-    Docker,
     models::HealthStatusEnum,
     query_parameters::{
-        RemoveContainerOptionsBuilder, StartContainerOptionsBuilder,
-        StopContainerOptionsBuilder,
+        RemoveContainerOptionsBuilder, StartContainerOptionsBuilder, StopContainerOptionsBuilder,
     },
+    Docker,
 };
 use tracing::{info, warn};
 
@@ -27,18 +26,17 @@ pub async fn stop(docker: &Docker, name: &str) -> Result<()> {
     let opts = StopContainerOptionsBuilder::default().t(10).build();
     match docker.stop_container(name, Some(opts)).await {
         Ok(_) => info!("Stopped '{name}'"),
-        Err(e) if e.to_string().contains("not running")
-               || e.to_string().contains("not found")
-               || e.to_string().contains("No such") => {}
+        Err(e)
+            if e.to_string().contains("not running")
+                || e.to_string().contains("not found")
+                || e.to_string().contains("No such") => {}
         Err(e) => return Err(e).context(format!("stopping container '{name}'")),
     }
     Ok(())
 }
 
 pub async fn remove(docker: &Docker, name: &str) -> Result<()> {
-    let opts = RemoveContainerOptionsBuilder::default()
-        .force(true)
-        .build();
+    let opts = RemoveContainerOptionsBuilder::default().force(true).build();
     match docker.remove_container(name, Some(opts)).await {
         Ok(_) => info!("Removed '{name}'"),
         Err(e) if e.to_string().contains("not found") || e.to_string().contains("No such") => {}

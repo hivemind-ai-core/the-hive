@@ -23,9 +23,7 @@ use agent::Agent;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
-    let filter = EnvFilter::new(format!(
-        "warn,hive_agent={level},hive_core={level}"
-    ));
+    let filter = EnvFilter::new(format!("warn,hive_agent={level},hive_core={level}"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     info!("Hive Agent starting...");
@@ -35,7 +33,8 @@ async fn main() -> anyhow::Result<()> {
 
     let agent_id = std::env::var("HIVE_AGENT_ID").expect("HIVE_AGENT_ID is required");
     let server_url = std::env::var("HIVE_SERVER_URL").expect("HIVE_SERVER_URL is required");
-    let app_daemon_url = std::env::var("HIVE_APP_DAEMON_URL").expect("HIVE_APP_DAEMON_URL is required");
+    let app_daemon_url =
+        std::env::var("HIVE_APP_DAEMON_URL").expect("HIVE_APP_DAEMON_URL is required");
     let coding_agent = std::env::var("CODING_AGENT").unwrap_or_else(|_| "kilo".to_string());
     let agent_name = std::env::var("HIVE_AGENT_NAME").unwrap_or_else(|_| agent_id.clone());
     let agent_tags: Vec<String> = std::env::var("HIVE_AGENT_TAGS")
@@ -51,7 +50,8 @@ async fn main() -> anyhow::Result<()> {
     info!("  App Daemon URL: {}", app_daemon_url);
     info!("  Coding Agent: {}", coding_agent);
 
-    let (cmd_tx, pending, mut push_rx) = client::start(server_url, agent_id.clone(), agent_name, agent_tags.clone());
+    let (cmd_tx, pending, mut push_rx) =
+        client::start(server_url, agent_id.clone(), agent_name, agent_tags.clone());
 
     let last_status = status::new_last_status();
 
@@ -61,7 +61,12 @@ async fn main() -> anyhow::Result<()> {
     // Watchdog: send agent.heartbeat if no status has been sent for 30s.
     status::spawn_watchdog(cmd_tx.clone(), Arc::clone(&last_status));
 
-    start_mcp_server(&agent_id, &app_daemon_url, cmd_tx.clone(), Arc::clone(&pending));
+    start_mcp_server(
+        &agent_id,
+        &app_daemon_url,
+        cmd_tx.clone(),
+        Arc::clone(&pending),
+    );
 
     let agent = Agent::new(agent_id, coding_agent, cmd_tx.clone(), pending, last_status);
 
@@ -83,7 +88,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 "push.notify" => {
-                    let messages: Vec<PushMessage> = msg.params
+                    let messages: Vec<PushMessage> = msg
+                        .params
                         .as_ref()
                         .and_then(|p| p.get("messages"))
                         .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -93,7 +99,10 @@ async fn main() -> anyhow::Result<()> {
                         info!("Push notification received while idle — spawning response ({} message(s))", messages.len());
                         agent.on_push_notify(messages);
                     } else {
-                        info!("Push notification received while busy — caching {} message(s)", messages.len());
+                        info!(
+                            "Push notification received while busy — caching {} message(s)",
+                            messages.len()
+                        );
                         if let Ok(mut cache) = agent.push_cache.lock() {
                             cache.extend(messages);
                         }
@@ -121,8 +130,12 @@ async fn main() -> anyhow::Result<()> {
 /// If `KILO_PROVIDER_JSON` is set in the environment, write it to
 /// `$HOME/.kilocode/cli/config.json` so the kilo CLI picks it up.
 fn apply_kilo_auth() {
-    let Ok(json_str) = std::env::var("KILO_PROVIDER_JSON") else { return };
-    if json_str.is_empty() { return }
+    let Ok(json_str) = std::env::var("KILO_PROVIDER_JSON") else {
+        return;
+    };
+    if json_str.is_empty() {
+        return;
+    }
     let Some(home) = std::env::var("HOME").ok().map(std::path::PathBuf::from) else {
         tracing::warn!("KILO_PROVIDER_JSON set but HOME is unset — skipping");
         return;
@@ -144,8 +157,12 @@ fn apply_kilo_auth() {
 /// If `CLAUDE_AUTH_JSON` is set in the environment, write it to
 /// `$HOME/.claude.json` so the claude CLI picks it up.
 fn apply_claude_auth() {
-    let Ok(json_str) = std::env::var("CLAUDE_AUTH_JSON") else { return };
-    if json_str.is_empty() { return }
+    let Ok(json_str) = std::env::var("CLAUDE_AUTH_JSON") else {
+        return;
+    };
+    if json_str.is_empty() {
+        return;
+    }
     let Some(home) = std::env::var("HOME").ok().map(std::path::PathBuf::from) else {
         tracing::warn!("CLAUDE_AUTH_JSON set but HOME is unset — skipping");
         return;
@@ -158,7 +175,12 @@ fn apply_claude_auth() {
     }
 }
 
-fn start_mcp_server(agent_id: &str, app_daemon_url: &str, cmd_tx: tokio::sync::mpsc::UnboundedSender<client::ClientCmd>, pending: client::PendingRequests) {
+fn start_mcp_server(
+    agent_id: &str,
+    app_daemon_url: &str,
+    cmd_tx: tokio::sync::mpsc::UnboundedSender<client::ClientCmd>,
+    pending: client::PendingRequests,
+) {
     let mcp_port: u16 = std::env::var("HIVE_MCP_PORT")
         .unwrap_or_else(|_| "7890".to_string())
         .parse()

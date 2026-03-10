@@ -7,15 +7,19 @@ use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{Terminal, backend::CrosstermBackend, layout::{Constraint, Direction, Layout}};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    Terminal,
+};
 
 use std::path::PathBuf;
 
-use crate::config::Config;
 use super::screens;
 use super::state::{ConfigWizardState, WizardCmd, WizardScreen};
+use crate::config::Config;
 
 /// Run the config wizard. Returns the updated `Config` on save, or an error on cancel.
 pub fn run(config: Config, project_dir: PathBuf) -> Result<Config> {
@@ -41,12 +45,12 @@ pub fn run(config: Config, project_dir: PathBuf) -> Result<Config> {
 
             screens::render_header(f, chunks[0], &state);
             match state.screen {
-                WizardScreen::Server  => screens::server::render(f, chunks[1], &state),
-                WizardScreen::Agents  => screens::agents::render(f, chunks[1], &state),
-                WizardScreen::App     => screens::app::render(f, chunks[1], &state),
-                WizardScreen::Exec    => screens::exec::render(f, chunks[1], &state),
+                WizardScreen::Server => screens::server::render(f, chunks[1], &state),
+                WizardScreen::Agents => screens::agents::render(f, chunks[1], &state),
+                WizardScreen::App => screens::app::render(f, chunks[1], &state),
+                WizardScreen::Exec => screens::exec::render(f, chunks[1], &state),
                 WizardScreen::Logging => screens::logging::render(f, chunks[1], &state),
-                WizardScreen::Review  => screens::review::render(f, chunks[1], &state),
+                WizardScreen::Review => screens::review::render(f, chunks[1], &state),
             }
             screens::render_footer(f, chunks[2], &state);
         })?;
@@ -56,7 +60,12 @@ pub fn run(config: Config, project_dir: PathBuf) -> Result<Config> {
         }
 
         let ev = event::read()?;
-        let Event::Key(KeyEvent { code, modifiers, .. }) = ev else { continue };
+        let Event::Key(KeyEvent {
+            code, modifiers, ..
+        }) = ev
+        else {
+            continue;
+        };
 
         // Global: Ctrl-C → cancel without save
         if code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
@@ -64,12 +73,12 @@ pub fn run(config: Config, project_dir: PathBuf) -> Result<Config> {
         }
 
         let cmd = match state.screen {
-            WizardScreen::Server  => screens::server::handle(code, modifiers, &mut state),
-            WizardScreen::Agents  => screens::agents::handle(code, modifiers, &mut state),
-            WizardScreen::App     => screens::app::handle(code, modifiers, &mut state),
-            WizardScreen::Exec    => screens::exec::handle(code, modifiers, &mut state),
+            WizardScreen::Server => screens::server::handle(code, modifiers, &mut state),
+            WizardScreen::Agents => screens::agents::handle(code, modifiers, &mut state),
+            WizardScreen::App => screens::app::handle(code, modifiers, &mut state),
+            WizardScreen::Exec => screens::exec::handle(code, modifiers, &mut state),
             WizardScreen::Logging => screens::logging::handle(code, modifiers, &mut state),
-            WizardScreen::Review  => screens::review::handle(code, modifiers, &mut state),
+            WizardScreen::Review => screens::review::handle(code, modifiers, &mut state),
         };
 
         match cmd {

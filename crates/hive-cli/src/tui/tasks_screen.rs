@@ -1,11 +1,11 @@
 //! Task list screen with filtering and detail view.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    Frame,
 };
 
 use super::state::{AppState, TaskSummary};
@@ -43,7 +43,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .enumerate()
         .map(|(i, t)| {
             let style = if i == selected {
-                Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .bg(Color::Blue)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -68,11 +70,18 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     );
 
     // Detail view.
-    render_detail(f, chunks[1], state.tasks.get(selected), state.task_detail_scroll);
+    render_detail(
+        f,
+        chunks[1],
+        state.tasks.get(selected),
+        state.task_detail_scroll,
+    );
 }
 
 fn render_detail(f: &mut Frame, area: Rect, task: Option<&TaskSummary>, scroll: u16) {
-    let block = Block::default().title("Detail ([ ] scroll)").borders(Borders::ALL);
+    let block = Block::default()
+        .title("Detail ([ ] scroll)")
+        .borders(Borders::ALL);
     match task {
         None => f.render_widget(Paragraph::new("Select a task").block(block), area),
         Some(t) => {

@@ -3,11 +3,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use bollard::{
-    Docker,
-    models::NetworkCreateRequest,
-    query_parameters::ListNetworksOptionsBuilder,
-};
+use bollard::{models::NetworkCreateRequest, query_parameters::ListNetworksOptionsBuilder, Docker};
 use tracing::info;
 
 /// Return the project-scoped external network name (server + app-daemon, host-accessible).

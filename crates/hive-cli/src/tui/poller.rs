@@ -21,19 +21,45 @@ pub struct StateUpdate {
 
 /// Commands sent from the TUI to the poller to perform server actions.
 pub enum TuiCmd {
-    SendPush { to_agent_id: String, content: String },
-    CreateTopic { title: String, content: String },
-    CreateTask { title: String, description: String, tags: Vec<String> },
-    CreateComment { topic_id: String, content: String },
-    UpdateTask { id: String, title: String, description: String, tags: Vec<String> },
-    SetTaskStatus { id: String, status: String },
-    FetchTopic { topic_id: String },
+    SendPush {
+        to_agent_id: String,
+        content: String,
+    },
+    CreateTopic {
+        title: String,
+        content: String,
+    },
+    CreateTask {
+        title: String,
+        description: String,
+        tags: Vec<String>,
+    },
+    CreateComment {
+        topic_id: String,
+        content: String,
+    },
+    UpdateTask {
+        id: String,
+        title: String,
+        description: String,
+        tags: Vec<String>,
+    },
+    SetTaskStatus {
+        id: String,
+        status: String,
+    },
+    FetchTopic {
+        topic_id: String,
+    },
 }
 
 /// Spawn a background thread that maintains a WS connection to `server_url`
 /// and sends `StateUpdate` values through `tx` whenever state changes.
 /// Returns a `Sender<TuiCmd>` for sending commands to the server.
-pub fn spawn(server_url: String, tx: std::sync::mpsc::Sender<StateUpdate>) -> UnboundedSender<TuiCmd> {
+pub fn spawn(
+    server_url: String,
+    tx: std::sync::mpsc::Sender<StateUpdate>,
+) -> UnboundedSender<TuiCmd> {
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<TuiCmd>();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("poller tokio runtime");
@@ -42,13 +68,26 @@ pub fn spawn(server_url: String, tx: std::sync::mpsc::Sender<StateUpdate>) -> Un
     cmd_tx
 }
 
-async fn run(server_url: String, tx: std::sync::mpsc::Sender<StateUpdate>, mut cmd_rx: UnboundedReceiver<TuiCmd>) {
+async fn run(
+    server_url: String,
+    tx: std::sync::mpsc::Sender<StateUpdate>,
+    mut cmd_rx: UnboundedReceiver<TuiCmd>,
+) {
     loop {
         if let Err(e) = connect_and_listen(&server_url, &tx, &mut cmd_rx).await {
             warn!("TUI server connection lost: {e}");
         }
         // Retry after a short delay if the TUI is still alive.
-        if tx.send(StateUpdate { agents: vec![], tasks: vec![], topics: vec![], topic_detail_id: None, topic_comments: vec![] }).is_err() {
+        if tx
+            .send(StateUpdate {
+                agents: vec![],
+                tasks: vec![],
+                topics: vec![],
+                topic_detail_id: None,
+                topic_comments: vec![],
+            })
+            .is_err()
+        {
             break; // TUI has exited
         }
         tokio::time::sleep(Duration::from_secs(3)).await;

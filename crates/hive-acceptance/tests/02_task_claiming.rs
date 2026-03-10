@@ -30,7 +30,11 @@ async fn get_next_returns_null_when_empty() {
     // No tasks exist — result is JSON null, normalized to None
     let res = call(&mut ws, "task.get_next", json!({})).await;
     assert!(res.error.is_none());
-    assert!(res.result.is_none(), "expected null result, got: {:?}", res.result);
+    assert!(
+        res.result.is_none(),
+        "expected null result, got: {:?}",
+        res.result
+    );
 }
 
 // AT-08: task.get_next with tag filter only returns matching tasks
@@ -39,8 +43,18 @@ async fn get_next_respects_tag_filter() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-08").await;
 
-    call(&mut ws, "task.create", json!({"title": "Rust Task", "tags": ["rust"]})).await;
-    call(&mut ws, "task.create", json!({"title": "Python Task", "tags": ["python"]})).await;
+    call(
+        &mut ws,
+        "task.create",
+        json!({"title": "Rust Task", "tags": ["rust"]}),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.create",
+        json!({"title": "Python Task", "tags": ["python"]}),
+    )
+    .await;
 
     let res = call(&mut ws, "task.get_next", json!({"tag": "python"})).await;
     assert!(res.error.is_none());
@@ -74,5 +88,9 @@ async fn get_next_skips_claimed_tasks() {
     // Agent B gets nothing — result is JSON null, normalized to None
     let res_b = call(&mut ws_b, "task.get_next", json!({})).await;
     assert!(res_b.error.is_none());
-    assert!(res_b.result.is_none(), "expected null result, got: {:?}", res_b.result);
+    assert!(
+        res_b.result.is_none(),
+        "expected null result, got: {:?}",
+        res_b.result
+    );
 }

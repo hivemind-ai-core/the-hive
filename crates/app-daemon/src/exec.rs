@@ -2,11 +2,7 @@
 
 use std::collections::HashMap;
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
@@ -29,11 +25,7 @@ impl Default for ExecConfig {
                 ("check".to_string(), "pnpm exec tsc --noEmit".to_string()),
                 ("build".to_string(), "pnpm build".to_string()),
             ]),
-            run_prefixes: vec![
-                "cargo".to_string(),
-                "npm".to_string(),
-                "pnpm".to_string(),
-            ],
+            run_prefixes: vec!["cargo".to_string(), "npm".to_string(), "pnpm".to_string()],
         }
     }
 }
@@ -98,14 +90,23 @@ mod tests {
         let cfg = default_cfg();
         assert_eq!(resolve_command("test", &cfg).unwrap(), "pnpm test");
         assert_eq!(resolve_command("build", &cfg).unwrap(), "pnpm build");
-        assert_eq!(resolve_command("check", &cfg).unwrap(), "pnpm exec tsc --noEmit");
+        assert_eq!(
+            resolve_command("check", &cfg).unwrap(),
+            "pnpm exec tsc --noEmit"
+        );
     }
 
     #[test]
     fn test_resolve_run_prefix_allowed() {
         let cfg = default_cfg();
-        assert_eq!(resolve_command("run cargo test", &cfg).unwrap(), "cargo test");
-        assert_eq!(resolve_command("run pnpm install", &cfg).unwrap(), "pnpm install");
+        assert_eq!(
+            resolve_command("run cargo test", &cfg).unwrap(),
+            "cargo test"
+        );
+        assert_eq!(
+            resolve_command("run pnpm install", &cfg).unwrap(),
+            "pnpm install"
+        );
         // Exact prefix match (no trailing args).
         assert_eq!(resolve_command("run cargo", &cfg).unwrap(), "cargo");
     }
@@ -122,13 +123,17 @@ mod tests {
         let cfg = default_cfg();
         let err = resolve_command("deploy", &cfg).unwrap_err();
         assert!(err.contains("unknown command"), "error: {err}");
-        assert!(err.contains("deploy"), "error should mention the command: {err}");
+        assert!(
+            err.contains("deploy"),
+            "error should mention the command: {err}"
+        );
     }
 
     #[test]
     fn test_resolve_custom_alias_overrides_default() {
         let mut cfg = default_cfg();
-        cfg.commands.insert("test".to_string(), "jest --ci".to_string());
+        cfg.commands
+            .insert("test".to_string(), "jest --ci".to_string());
         assert_eq!(resolve_command("test", &cfg).unwrap(), "jest --ci");
     }
 
@@ -144,7 +149,10 @@ mod tests {
         let cfg = default_cfg();
         // "carg" is a partial match for "cargo" but not a valid prefix.
         let err = resolve_command("run carg test", &cfg).unwrap_err();
-        assert!(err.contains("not allowed"), "near-match should be rejected: {err}");
+        assert!(
+            err.contains("not allowed"),
+            "near-match should be rejected: {err}"
+        );
     }
 
     #[test]
@@ -152,7 +160,10 @@ mod tests {
         let cfg = default_cfg();
         // "run " with nothing (or only whitespace) after → empty inner after trim.
         let err = resolve_command("run ", &cfg).unwrap_err();
-        assert!(err.contains("not allowed"), "empty run inner should be rejected: {err}");
+        assert!(
+            err.contains("not allowed"),
+            "empty run inner should be rejected: {err}"
+        );
     }
 
     #[test]
@@ -166,8 +177,14 @@ mod tests {
     #[test]
     fn test_resolve_run_cargo_subcommands() {
         let cfg = default_cfg();
-        assert_eq!(resolve_command("run cargo build", &cfg).unwrap(), "cargo build");
-        assert_eq!(resolve_command("run cargo test --release", &cfg).unwrap(), "cargo test --release");
+        assert_eq!(
+            resolve_command("run cargo build", &cfg).unwrap(),
+            "cargo build"
+        );
+        assert_eq!(
+            resolve_command("run cargo test --release", &cfg).unwrap(),
+            "cargo test --release"
+        );
         assert_eq!(
             resolve_command("run cargo clippy -- -D warnings", &cfg).unwrap(),
             "cargo clippy -- -D warnings"
@@ -227,9 +244,15 @@ mod tests {
             commands: std::collections::HashMap::new(),
             run_prefixes: vec!["python".to_string()],
         };
-        assert_eq!(resolve_command("run python main.py", &cfg).unwrap(), "python main.py");
+        assert_eq!(
+            resolve_command("run python main.py", &cfg).unwrap(),
+            "python main.py"
+        );
         let err = resolve_command("run cargo build", &cfg).unwrap_err();
-        assert!(err.contains("not allowed"), "non-configured prefix rejected: {err}");
+        assert!(
+            err.contains("not allowed"),
+            "non-configured prefix rejected: {err}"
+        );
     }
 }
 
@@ -269,7 +292,11 @@ pub async fn exec(
     };
 
     Ok(Json(ExecResponse {
-        status: if output.status.success() { "ok" } else { "error" },
+        status: if output.status.success() {
+            "ok"
+        } else {
+            "error"
+        },
         output: combined,
         exit_code,
     }))

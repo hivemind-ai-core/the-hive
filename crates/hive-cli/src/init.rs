@@ -3,10 +3,10 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 
+use crate::config::io::{default_path, hive_dir};
 use crate::config::{self, Agent};
-use crate::config::io::{hive_dir, default_path};
 use crate::install;
 use crate::tui;
 
@@ -16,8 +16,7 @@ pub fn run(project_dir: &Path) -> Result<()> {
     let config_path = default_path(project_dir);
 
     // Create .hive/ directory.
-    std::fs::create_dir_all(&hive)
-        .with_context(|| format!("creating {}", hive.display()))?;
+    std::fs::create_dir_all(&hive).with_context(|| format!("creating {}", hive.display()))?;
 
     println!("Initializing Hive in {}", hive.display());
 
@@ -46,7 +45,10 @@ pub fn run(project_dir: &Path) -> Result<()> {
         }
         tui::config::run_wizard(seed, project_dir.to_path_buf())?
     } else {
-        println!("Config already exists — skipping wizard. Edit {} to change settings.", config_path.display());
+        println!(
+            "Config already exists — skipping wizard. Edit {} to change settings.",
+            config_path.display()
+        );
         existing
     };
 
@@ -75,8 +77,7 @@ pub fn run(project_dir: &Path) -> Result<()> {
 
     // Copy pre-built binaries from ~/.hive/bin/ → .hive/bin/ (always overwrite).
     let bin_dst = hive.join("bin");
-    std::fs::create_dir_all(&bin_dst)
-        .with_context(|| format!("creating {}", bin_dst.display()))?;
+    std::fs::create_dir_all(&bin_dst).with_context(|| format!("creating {}", bin_dst.display()))?;
 
     for name in &["hive-server", "hive-agent", "app-daemon"] {
         let src = install::container_binary(name);
@@ -87,8 +88,7 @@ pub fn run(project_dir: &Path) -> Result<()> {
             );
         }
         let dst = bin_dst.join(name);
-        std::fs::copy(&src, &dst)
-            .with_context(|| format!("copying {name} to .hive/bin/"))?;
+        std::fs::copy(&src, &dst).with_context(|| format!("copying {name} to .hive/bin/"))?;
         std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o755))
             .with_context(|| format!("setting permissions on {name}"))?;
         println!("Copied {name} → .hive/bin/{name}");
@@ -114,8 +114,7 @@ fn write_if_new(path: &Path, content: &str, verb: &str) -> Result<()> {
     if path.exists() {
         println!("Skipped {} (already exists)", path.display());
     } else {
-        std::fs::write(path, content)
-            .with_context(|| format!("writing {}", path.display()))?;
+        std::fs::write(path, content).with_context(|| format!("writing {}", path.display()))?;
         println!("{} {}", verb, path.display());
     }
     Ok(())
@@ -149,7 +148,15 @@ fn generate_project_id(project_dir: &Path) -> String {
 
 fn update_gitignore(project_dir: &Path) -> Result<()> {
     let gitignore = project_dir.join(".gitignore");
-    let entries = [".hive/hive.db", ".hive/bin/", ".hive/.env", ".hive/claude.json", ".hive/agents/", ".hive/kilocode/", ".mcp.json"];
+    let entries = [
+        ".hive/hive.db",
+        ".hive/bin/",
+        ".hive/.env",
+        ".hive/claude.json",
+        ".hive/agents/",
+        ".hive/kilocode/",
+        ".mcp.json",
+    ];
 
     let existing = if gitignore.exists() {
         std::fs::read_to_string(&gitignore).context("reading .gitignore")?

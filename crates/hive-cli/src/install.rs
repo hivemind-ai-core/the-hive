@@ -58,10 +58,8 @@ pub fn is_installed() -> bool {
 pub fn ensure_dirs() -> Result<()> {
     let bin = hive_bin_dir();
     let docker = hive_docker_dir();
-    std::fs::create_dir_all(&bin)
-        .with_context(|| format!("creating {}", bin.display()))?;
-    std::fs::create_dir_all(&docker)
-        .with_context(|| format!("creating {}", docker.display()))?;
+    std::fs::create_dir_all(&bin).with_context(|| format!("creating {}", bin.display()))?;
+    std::fs::create_dir_all(&docker).with_context(|| format!("creating {}", docker.display()))?;
     Ok(())
 }
 

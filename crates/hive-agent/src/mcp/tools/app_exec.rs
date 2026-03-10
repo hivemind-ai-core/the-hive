@@ -26,7 +26,10 @@ pub async fn exec(state: &McpState, params: Option<Value>) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.command is required"))?
         .to_string();
-    let pattern = p.get("pattern").and_then(|v| v.as_str()).map(str::to_string);
+    let pattern = p
+        .get("pattern")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
     let app_daemon_url = &state.app_daemon_url;
     let url = format!("{app_daemon_url}/exec");

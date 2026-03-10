@@ -1,11 +1,11 @@
 //! Message board screen: topic list + comment view.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    Frame,
 };
 
 use super::state::AppState;
@@ -89,7 +89,9 @@ fn render_topic_list(f: &mut Frame, area: Rect, state: &AppState) {
         .enumerate()
         .map(|(i, t)| {
             let style = if i == selected {
-                Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .bg(Color::Blue)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -110,7 +112,11 @@ fn render_topic_list(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_stateful_widget(
         List::new(items)
             .block(Block::default().title("Topics").borders(Borders::ALL))
-            .highlight_style(Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)),
+            .highlight_style(
+                Style::default()
+                    .bg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ),
         area,
         &mut list_state,
     );

@@ -2,11 +2,11 @@
 
 use chrono::Utc;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    Frame,
 };
 
 use super::state::{AppState, TaskSummary};
@@ -17,9 +17,9 @@ fn staleness_secs(a: &Agent) -> Option<i64> {
 }
 
 fn current_task<'a>(tasks: &'a [TaskSummary], agent_id: &str) -> Option<&'a TaskSummary> {
-    tasks.iter().find(|t| {
-        t.status == "inprogress" && t.assigned.as_deref() == Some(agent_id)
-    })
+    tasks
+        .iter()
+        .find(|t| t.status == "inprogress" && t.assigned.as_deref() == Some(agent_id))
 }
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -58,7 +58,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 ),
                 Some(secs) if secs > 60 => (
                     a.name.clone(),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::DIM),
                 ),
                 _ => (a.name.clone(), Style::default()),
             };
@@ -69,7 +71,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let selected = state.selected_agent_idx.min(state.agents.len().saturating_sub(1));
+    let selected = state
+        .selected_agent_idx
+        .min(state.agents.len().saturating_sub(1));
     let mut list_state = ListState::default();
     list_state.select(Some(selected));
 
@@ -102,24 +106,17 @@ fn render_detail(f: &mut Frame, area: Rect, agent: Option<&Agent>, task: Option<
                     format!("{}s ago (stale)", secs),
                     Style::default().fg(Color::Red),
                 ),
-                Some(secs) if secs > 60 => (
-                    format!("{}s ago", secs),
-                    Style::default().fg(Color::Yellow),
-                ),
-                Some(secs) => (
-                    format!("{}s ago", secs),
-                    Style::default().fg(Color::Green),
-                ),
+                Some(secs) if secs > 60 => {
+                    (format!("{}s ago", secs), Style::default().fg(Color::Yellow))
+                }
+                Some(secs) => (format!("{}s ago", secs), Style::default().fg(Color::Green)),
             };
             let (status_text, status_style) = match task {
                 Some(t) => (
                     format!("● Working on: {}", t.title),
                     Style::default().fg(Color::Green),
                 ),
-                None => (
-                    "○ Idle".to_string(),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                None => ("○ Idle".to_string(), Style::default().fg(Color::DarkGray)),
             };
             let lines = vec![
                 Line::from(vec![

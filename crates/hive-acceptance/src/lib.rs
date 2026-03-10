@@ -9,11 +9,7 @@ use futures_util::{SinkExt, StreamExt};
 use hive_core::types::{ApiMessage, MessageType};
 use hive_server::{db, state, ws};
 use tokio::net::TcpListener;
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::Message,
-    MaybeTlsStream, WebSocketStream,
-};
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
 pub use serde_json::{json, Value};
@@ -128,7 +124,11 @@ pub async fn recv_push(ws: &mut WsClient, timeout: std::time::Duration) -> Optio
 /// Read the next push message matching a specific method.
 ///
 /// Skips push messages that don't match `method`. Times out after `timeout`.
-pub async fn recv_push_method(ws: &mut WsClient, method: &str, timeout: std::time::Duration) -> Option<Value> {
+pub async fn recv_push_method(
+    ws: &mut WsClient,
+    method: &str,
+    timeout: std::time::Duration,
+) -> Option<Value> {
     let deadline = tokio::time::sleep(timeout);
     tokio::pin!(deadline);
 

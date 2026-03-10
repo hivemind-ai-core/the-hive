@@ -1,8 +1,8 @@
 //! Agent struct: owns task execution lifecycle.
 
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicU8, Ordering},
+    Arc, Mutex,
 };
 
 use hive_core::types::{PushMessage, Task};
@@ -180,7 +180,15 @@ impl Agent {
     }
 
     fn spawn_push_only(agent: Agent, messages: Vec<PushMessage>) {
-        let Agent { agent_id, coding_agent, cmd_tx, active_tasks, last_status, push_cache, .. } = agent;
+        let Agent {
+            agent_id,
+            coding_agent,
+            cmd_tx,
+            active_tasks,
+            last_status,
+            push_cache,
+            ..
+        } = agent;
         let message_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
         tokio::spawn(async move {
             // active_tasks already incremented synchronously in on_push_notify.

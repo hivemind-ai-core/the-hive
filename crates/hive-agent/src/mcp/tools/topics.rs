@@ -38,7 +38,8 @@ pub async fn wait(state: &McpState, params: Option<Value>) -> Result<Value> {
     loop {
         let req = client::request("topic.get", params.clone());
         let result = call_server(state, req).await?;
-        let count = result.get("comments")
+        let count = result
+            .get("comments")
             .and_then(|v| v.as_array())
             .map_or(0, |a| a.len() as u64);
         if count >= expected_min {

@@ -37,7 +37,11 @@ pub fn create(pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<Va
         anyhow::bail!("title must not be empty");
     }
     // Use the connection's agent_id as creator (server-side enforcement).
-    let creator = if agent_id.is_empty() { p.creator_agent_id } else { Some(agent_id.to_string()) };
+    let creator = if agent_id.is_empty() {
+        p.creator_agent_id
+    } else {
+        Some(agent_id.to_string())
+    };
     let topic = Topic::new(p.title, p.content, creator);
     db_mb::insert_topic(pool, &topic)?;
     Ok(serde_json::to_value(&topic)?)
@@ -59,7 +63,12 @@ pub fn list_new(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     Ok(serde_json::to_value(&topics)?)
 }
 
-pub fn comment(pool: &DbPool, registry: &AgentRegistry, agent_id: &str, params: Option<Value>) -> Result<Value> {
+pub fn comment(
+    pool: &DbPool,
+    registry: &AgentRegistry,
+    agent_id: &str,
+    params: Option<Value>,
+) -> Result<Value> {
     use hive_core::types::Comment;
     #[derive(serde::Deserialize)]
     struct CommentParams {
@@ -69,7 +78,11 @@ pub fn comment(pool: &DbPool, registry: &AgentRegistry, agent_id: &str, params: 
     }
     let p: CommentParams = serde_json::from_value(params.unwrap_or(Value::Null))?;
     // Use the connection's agent_id as creator (server-side enforcement).
-    let creator = if agent_id.is_empty() { p.creator_agent_id } else { Some(agent_id.to_string()) };
+    let creator = if agent_id.is_empty() {
+        p.creator_agent_id
+    } else {
+        Some(agent_id.to_string())
+    };
     let comment = Comment::new(p.topic_id, p.content, creator);
     db_mb::insert_comment(pool, &comment)?;
 
@@ -109,7 +122,11 @@ pub(crate) fn extract_mentions(content: &str) -> Vec<String> {
             let id = word
                 .strip_prefix('@')?
                 .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
-            if id.is_empty() { None } else { Some(id.to_string()) }
+            if id.is_empty() {
+                None
+            } else {
+                Some(id.to_string())
+            }
         })
         .collect()
 }
@@ -123,18 +140,26 @@ pub(crate) fn extract_mentions(content: &str) -> Vec<String> {
 /// Params: `{ "id": "<topic-id>", "since_count": <u64>, "timeout_secs": <u64> }`
 pub async fn wait(pool: &DbPool, params: Option<Value>) -> Result<Value> {
     let p = params.unwrap_or(Value::Null);
-    let id = p.get("id").and_then(|v| v.as_str())
+    let id = p
+        .get("id")
+        .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.id is required"))?
         .to_string();
-    let since_count = p.get("since_count").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_SINCE_COUNT) as usize;
-    let timeout_secs = p.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_WAIT_TIMEOUT_SECS);
+    let since_count = p
+        .get("since_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(DEFAULT_SINCE_COUNT) as usize;
+    let timeout_secs = p
+        .get("timeout_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(DEFAULT_WAIT_TIMEOUT_SECS);
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
     loop {
         let comments = db_mb::get_comments(pool, &id)?;
         if comments.len() > since_count {
-            let topic = db_mb::get_topic(pool, &id)?
-                .ok_or_else(|| anyhow::anyhow!("topic not found"))?;
+            let topic =
+                db_mb::get_topic(pool, &id)?.ok_or_else(|| anyhow::anyhow!("topic not found"))?;
             return Ok(serde_json::json!({ "topic": topic, "comments": comments }));
         }
         if tokio::time::Instant::now() >= deadline {
@@ -152,8 +177,7 @@ pub fn get(pool: &DbPool, params: Option<Value>) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("params.id is required"))?;
 
-    let topic = db_mb::get_topic(pool, id)?
-        .ok_or_else(|| anyhow::anyhow!("topic not found"))?;
+    let topic = db_mb::get_topic(pool, id)?.ok_or_else(|| anyhow::anyhow!("topic not found"))?;
     let comments = db_mb::get_comments(pool, id)?;
 
     Ok(serde_json::json!({
@@ -231,10 +255,15 @@ mod tests {
     #[test]
     fn create_topic_with_valid_params() {
         let pool = open_test_db();
-        let result = create(&pool, "agent-1", Some(json!({
-            "title": "Test Topic",
-            "content": "Body text"
-        }))).unwrap();
+        let result = create(
+            &pool,
+            "agent-1",
+            Some(json!({
+                "title": "Test Topic",
+                "content": "Body text"
+            })),
+        )
+        .unwrap();
         assert_eq!(result["title"], "Test Topic");
         assert_eq!(result["content"], "Body text");
         assert_eq!(result["creator_agent_id"], "agent-1");
@@ -311,7 +340,13 @@ mod tests {
         let topic = create(&pool, "a", Some(json!({"title": "T", "content": "c"}))).unwrap();
         let topic_id = topic["id"].as_str().unwrap();
 
-        comment(&pool, &registry, "a", Some(json!({"topic_id": topic_id, "content": "Reply"}))).unwrap();
+        comment(
+            &pool,
+            &registry,
+            "a",
+            Some(json!({"topic_id": topic_id, "content": "Reply"})),
+        )
+        .unwrap();
 
         let result = get(&pool, Some(json!({"id": topic_id}))).unwrap();
         assert_eq!(result["topic"]["title"], "T");
@@ -340,10 +375,16 @@ mod tests {
         let topic = create(&pool, "a", Some(json!({"title": "T", "content": "c"}))).unwrap();
         let topic_id = topic["id"].as_str().unwrap();
 
-        let result = comment(&pool, &registry, "a", Some(json!({
-            "topic_id": topic_id,
-            "content": "Hello!"
-        }))).unwrap();
+        let result = comment(
+            &pool,
+            &registry,
+            "a",
+            Some(json!({
+                "topic_id": topic_id,
+                "content": "Hello!"
+            })),
+        )
+        .unwrap();
         assert_eq!(result["content"], "Hello!");
         assert_eq!(result["creator_agent_id"], "a");
     }
@@ -352,10 +393,16 @@ mod tests {
     fn comment_on_unknown_topic_errors() {
         let pool = open_test_db();
         let registry = agent_registry::new_registry();
-        assert!(comment(&pool, &registry, "a", Some(json!({
-            "topic_id": "ghost",
-            "content": "Hello"
-        }))).is_err());
+        assert!(comment(
+            &pool,
+            &registry,
+            "a",
+            Some(json!({
+                "topic_id": "ghost",
+                "content": "Hello"
+            }))
+        )
+        .is_err());
     }
 
     #[test]

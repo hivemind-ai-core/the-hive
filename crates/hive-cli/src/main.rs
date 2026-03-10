@@ -24,7 +24,13 @@ struct Args {
     #[arg(short, long, global = true, help = "Verbose logging")]
     verbose: bool,
 
-    #[arg(short, long, global = true, help = "Project directory", default_value = ".")]
+    #[arg(
+        short,
+        long,
+        global = true,
+        help = "Project directory",
+        default_value = "."
+    )]
     directory: PathBuf,
 
     #[command(subcommand)]
@@ -132,9 +138,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let log_level = if args.verbose { "debug" } else { "info" };
-    tracing_subscriber::fmt()
-        .with_env_filter(log_level)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(log_level).init();
 
     match args.command {
         Commands::Init => init::run(&args.directory)?,
@@ -143,7 +147,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Restart => commands::restart(&args.directory).await?,
         Commands::Rebuild { target } => commands::rebuild(&args.directory, &target).await?,
         Commands::Status => commands::status(&args.directory).await?,
-        Commands::Logs { container, follow } => commands::logs(&args.directory, &container, follow).await?,
+        Commands::Logs { container, follow } => {
+            commands::logs(&args.directory, &container, follow).await?
+        }
         Commands::Config { global } => {
             if global {
                 let path = config::global_config_path();
@@ -182,21 +188,33 @@ async fn main() -> anyhow::Result<()> {
                 println!();
                 println!("For claude agents (choose one):");
                 println!("  hive auth set-key ANTHROPIC_API_KEY sk-ant-...   # API key");
-                println!("  hive auth sync                                    # copy ~/.claude.json");
+                println!(
+                    "  hive auth sync                                    # copy ~/.claude.json"
+                );
                 println!("  hive auth login                                   # interactive login");
                 println!();
                 println!("Current status:");
                 commands::auth_status(&args.directory)?;
                 println!();
-                println!("Subcommands: set-key, set-endpoint, list, status, sync, kilo-sync, login");
+                println!(
+                    "Subcommands: set-key, set-endpoint, list, status, sync, kilo-sync, login"
+                );
             }
             Some(AuthAction::Status) => commands::auth_status(&args.directory)?,
-            Some(AuthAction::SetKey { key, value, agent }) => commands::auth_set_key(&args.directory, &key, &value, agent.as_deref())?,
-            Some(AuthAction::SetEndpoint { key, url, agent }) => commands::auth_set_endpoint(&args.directory, &key, &url, agent.as_deref())?,
+            Some(AuthAction::SetKey { key, value, agent }) => {
+                commands::auth_set_key(&args.directory, &key, &value, agent.as_deref())?
+            }
+            Some(AuthAction::SetEndpoint { key, url, agent }) => {
+                commands::auth_set_endpoint(&args.directory, &key, &url, agent.as_deref())?
+            }
             Some(AuthAction::List) => commands::auth_list(&args.directory)?,
             Some(AuthAction::Sync) => commands::auth_sync(&args.directory)?,
-            Some(AuthAction::KiloSync { agent }) => commands::auth_kilo_sync(&args.directory, agent.as_deref())?,
-            Some(AuthAction::Login { email }) => commands::auth_login(&args.directory, email.as_deref()).await?,
+            Some(AuthAction::KiloSync { agent }) => {
+                commands::auth_kilo_sync(&args.directory, agent.as_deref())?
+            }
+            Some(AuthAction::Login { email }) => {
+                commands::auth_login(&args.directory, email.as_deref()).await?
+            }
         },
     }
 

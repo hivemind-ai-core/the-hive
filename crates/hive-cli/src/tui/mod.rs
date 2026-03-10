@@ -1,10 +1,10 @@
 pub mod agents_screen;
 pub mod app;
-pub mod settings_screen;
 pub mod config;
 pub mod dashboard;
 pub mod events;
 pub mod message_board;
 pub mod poller;
+pub mod settings_screen;
 pub mod state;
 pub mod tasks_screen;

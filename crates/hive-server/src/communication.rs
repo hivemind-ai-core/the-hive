@@ -75,15 +75,13 @@ pub fn upsert_agent(pool: &DbPool, agent: &Agent) -> Result<()> {
     Ok(())
 }
 
-
 pub fn list_agents(pool: &DbPool) -> Result<Vec<Agent>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT id, name, tags, connected_at, last_seen_at FROM agents ORDER BY name ASC",
     )?;
     let rows = stmt.query_map([], row_to_agent)?;
-    rows.map(|r| r.context("reading agent row"))
-        .collect()
+    rows.map(|r| r.context("reading agent row")).collect()
 }
 
 pub fn touch_agent(pool: &DbPool, id: &str) -> Result<()> {
@@ -258,7 +256,10 @@ mod tests {
         let updated = agents.iter().find(|a| a.id == "touchable").unwrap();
         // last_seen_at should now be recent (after epoch 0).
         if let Some(lsa) = updated.last_seen_at {
-            assert!(lsa.timestamp() > 1_000_000_000, "last_seen_at should be updated to now");
+            assert!(
+                lsa.timestamp() > 1_000_000_000,
+                "last_seen_at should be updated to now"
+            );
         }
     }
 

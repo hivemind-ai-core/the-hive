@@ -62,8 +62,18 @@ async fn task_list_by_tag() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-03").await;
 
-    call(&mut ws, "task.create", json!({"title": "Rust Task", "tags": ["rust", "backend"]})).await;
-    call(&mut ws, "task.create", json!({"title": "Python Task", "tags": ["python"]})).await;
+    call(
+        &mut ws,
+        "task.create",
+        json!({"title": "Rust Task", "tags": ["rust", "backend"]}),
+    )
+    .await;
+    call(
+        &mut ws,
+        "task.create",
+        json!({"title": "Python Task", "tags": ["python"]}),
+    )
+    .await;
     call(&mut ws, "task.create", json!({"title": "No Tag Task"})).await;
 
     let res = call(&mut ws, "task.list", json!({"tag": "rust"})).await;
@@ -83,11 +93,16 @@ async fn task_update_fields() {
     let res = call(&mut ws, "task.create", json!({"title": "Original Title"})).await;
     let id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let res = call(&mut ws, "task.update", json!({
-        "id": &id,
-        "description": "New description",
-        "tags": ["rust", "test"]
-    })).await;
+    let res = call(
+        &mut ws,
+        "task.update",
+        json!({
+            "id": &id,
+            "description": "New description",
+            "tags": ["rust", "test"]
+        }),
+    )
+    .await;
     assert!(res.error.is_none(), "update failed: {:?}", res.error);
     let updated = res.result.unwrap();
     assert_eq!(updated["description"], "New description");
@@ -96,8 +111,12 @@ async fn task_update_fields() {
     let res = call(&mut ws, "task.get", json!({"id": &id})).await;
     let got = res.result.unwrap();
     assert_eq!(got["description"], "New description");
-    let tags: Vec<&str> = got["tags"].as_array().unwrap()
-        .iter().map(|v| v.as_str().unwrap()).collect();
+    let tags: Vec<&str> = got["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
     assert!(tags.contains(&"rust"));
     assert!(tags.contains(&"test"));
 }

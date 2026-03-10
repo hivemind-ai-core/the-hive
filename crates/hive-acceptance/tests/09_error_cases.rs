@@ -23,7 +23,10 @@ async fn task_create_whitespace_title_errors() {
     let mut ws = connect(addr, "agent-e02").await;
 
     let res = call(&mut ws, "task.create", json!({"title": "   "})).await;
-    assert!(res.error.is_some(), "whitespace-only title should be an error");
+    assert!(
+        res.error.is_some(),
+        "whitespace-only title should be an error"
+    );
 }
 
 // AT-E03: task.create with missing title field returns an error
@@ -66,8 +69,16 @@ async fn task_update_unknown_id_errors() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-e06").await;
 
-    let res = call(&mut ws, "task.update", json!({"id": "ghost-id", "description": "x"})).await;
-    assert!(res.error.is_some(), "updating unknown task should be an error");
+    let res = call(
+        &mut ws,
+        "task.update",
+        json!({"id": "ghost-id", "description": "x"}),
+    )
+    .await;
+    assert!(
+        res.error.is_some(),
+        "updating unknown task should be an error"
+    );
 }
 
 // AT-E07: task.update with invalid status transition errors
@@ -93,8 +104,16 @@ async fn task_update_unknown_status_errors() {
     let res = call(&mut ws, "task.create", json!({"title": "T"})).await;
     let id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let res = call(&mut ws, "task.update", json!({"id": &id, "status": "flying"})).await;
-    assert!(res.error.is_some(), "unknown status string should be an error");
+    let res = call(
+        &mut ws,
+        "task.update",
+        json!({"id": &id, "status": "flying"}),
+    )
+    .await;
+    assert!(
+        res.error.is_some(),
+        "unknown status string should be an error"
+    );
 }
 
 // ── task.complete ─────────────────────────────────────────────────────────────
@@ -106,7 +125,10 @@ async fn task_complete_unknown_id_errors() {
     let mut ws = connect(addr, "agent-e09").await;
 
     let res = call(&mut ws, "task.complete", json!({"id": "ghost"})).await;
-    assert!(res.error.is_some(), "completing unknown task should be an error");
+    assert!(
+        res.error.is_some(),
+        "completing unknown task should be an error"
+    );
 }
 
 // AT-E10: task.complete without id param returns error
@@ -130,7 +152,12 @@ async fn task_set_dependency_self_errors() {
     let res = call(&mut ws, "task.create", json!({"title": "T"})).await;
     let id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let res = call(&mut ws, "task.set_dependency", json!({"task_id": &id, "depends_on_id": &id})).await;
+    let res = call(
+        &mut ws,
+        "task.set_dependency",
+        json!({"task_id": &id, "depends_on_id": &id}),
+    )
+    .await;
     assert!(res.error.is_some(), "self-dependency should be an error");
 }
 
@@ -143,7 +170,12 @@ async fn task_set_dependency_missing_task_id_errors() {
     let res = call(&mut ws, "task.create", json!({"title": "T"})).await;
     let id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
-    let res = call(&mut ws, "task.set_dependency", json!({"depends_on_id": &id})).await;
+    let res = call(
+        &mut ws,
+        "task.set_dependency",
+        json!({"depends_on_id": &id}),
+    )
+    .await;
     assert!(res.error.is_some(), "missing task_id should be an error");
 }
 
@@ -153,17 +185,36 @@ async fn task_set_dependency_cycle_errors() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-e13").await;
 
-    let a = call(&mut ws, "task.create", json!({"title": "A"})).await.result.unwrap();
-    let b = call(&mut ws, "task.create", json!({"title": "B"})).await.result.unwrap();
+    let a = call(&mut ws, "task.create", json!({"title": "A"}))
+        .await
+        .result
+        .unwrap();
+    let b = call(&mut ws, "task.create", json!({"title": "B"}))
+        .await
+        .result
+        .unwrap();
     let a_id = a["id"].as_str().unwrap();
     let b_id = b["id"].as_str().unwrap();
 
     // A depends on B
-    call(&mut ws, "task.set_dependency", json!({"task_id": a_id, "depends_on_id": b_id})).await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        json!({"task_id": a_id, "depends_on_id": b_id}),
+    )
+    .await;
 
     // B depends on A → cycle
-    let res = call(&mut ws, "task.set_dependency", json!({"task_id": b_id, "depends_on_id": a_id})).await;
-    assert!(res.error.is_some(), "circular dependency should be an error");
+    let res = call(
+        &mut ws,
+        "task.set_dependency",
+        json!({"task_id": b_id, "depends_on_id": a_id}),
+    )
+    .await;
+    assert!(
+        res.error.is_some(),
+        "circular dependency should be an error"
+    );
 }
 
 // ── task.split ────────────────────────────────────────────────────────────────
@@ -197,8 +248,16 @@ async fn task_split_nonexistent_task_errors() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-e16").await;
 
-    let res = call(&mut ws, "task.split", json!({"id": "ghost", "subtasks": ["S1"]})).await;
-    assert!(res.error.is_some(), "splitting nonexistent task should be an error");
+    let res = call(
+        &mut ws,
+        "task.split",
+        json!({"id": "ghost", "subtasks": ["S1"]}),
+    )
+    .await;
+    assert!(
+        res.error.is_some(),
+        "splitting nonexistent task should be an error"
+    );
 }
 
 // ── topic.get ─────────────────────────────────────────────────────────────────
@@ -219,11 +278,19 @@ async fn topic_comment_unknown_topic_errors() {
     let addr = start_server().await;
     let mut ws = connect(addr, "agent-e18").await;
 
-    let res = call(&mut ws, "topic.comment", json!({
-        "topic_id": "ghost-topic-id",
-        "content": "Hello"
-    })).await;
-    assert!(res.error.is_some(), "commenting on unknown topic should be an error");
+    let res = call(
+        &mut ws,
+        "topic.comment",
+        json!({
+            "topic_id": "ghost-topic-id",
+            "content": "Hello"
+        }),
+    )
+    .await;
+    assert!(
+        res.error.is_some(),
+        "commenting on unknown topic should be an error"
+    );
 }
 
 // AT-E19: topic.create with missing title errors
@@ -255,7 +322,10 @@ async fn push_send_missing_recipient_errors() {
     let mut ws = connect(addr, "agent-e21").await;
 
     let res = call(&mut ws, "push.send", json!({"content": "hello"})).await;
-    assert!(res.error.is_some(), "missing to_agent_id should be an error");
+    assert!(
+        res.error.is_some(),
+        "missing to_agent_id should be an error"
+    );
 }
 
 // AT-E22: push.send with missing content errors

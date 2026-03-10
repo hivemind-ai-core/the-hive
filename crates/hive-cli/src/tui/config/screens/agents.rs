@@ -17,11 +17,11 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 
 use super::render_field;
@@ -34,10 +34,10 @@ const AUTH_MODES: &[&str] = &["none", "synced", "api_key"];
 /// Number of visible fields for the agent editor based on auth mode.
 fn agent_field_count(agent: &Agent) -> usize {
     match agent.auth.as_str() {
-        "none"    => 4, // name, coding_agent, tags, auth
-        "synced"  => 5, // + sub-field (provider or status)
+        "none" => 4,    // name, coding_agent, tags, auth
+        "synced" => 5,  // + sub-field (provider or status)
         "api_key" => 6, // + api_key + endpoint_url
-        _         => 4,
+        _ => 4,
     }
 }
 
@@ -52,7 +52,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
 }
 
 fn render_list(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
-    let block = Block::default().title(" Agents — press 'a' to add, 'd' to delete ").borders(Borders::ALL);
+    let block = Block::default()
+        .title(" Agents — press 'a' to add, 'd' to delete ")
+        .borders(Borders::ALL);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -67,7 +69,9 @@ fn render_list(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
     for (i, agent) in state.config.agents.iter().enumerate() {
         let focused = state.field_idx == i;
         let base_style = if focused {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
         };
@@ -80,7 +84,12 @@ fn render_list(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
         };
         let line = Line::from(vec![
             Span::styled(
-                format!("{marker}{:<20} {:<8} [{}]", agent.name, agent.coding_agent, agent.tags.join(",")),
+                format!(
+                    "{marker}{:<20} {:<8} [{}]",
+                    agent.name,
+                    agent.coding_agent,
+                    agent.tags.join(",")
+                ),
                 base_style,
             ),
             Span::raw("  "),
@@ -92,19 +101,26 @@ fn render_list(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
     // "Add agent" row
     let add_focused = state.field_idx == agent_count;
     let add_style = if add_focused {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
     let add_marker = if add_focused { "> " } else { "  " };
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(format!("{add_marker}[ Add agent ]"), add_style))),
+        Paragraph::new(Line::from(Span::styled(
+            format!("{add_marker}[ Add agent ]"),
+            add_style,
+        ))),
         rows[agent_count],
     );
 }
 
 fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize) {
-    let Some(agent) = state.config.agents.get(idx) else { return };
+    let Some(agent) = state.config.agents.get(idx) else {
+        return;
+    };
     let title = format!(" Edit agent '{}' — Esc to return ", agent.name);
     let block = Block::default().title(title).borders(Borders::ALL);
     let inner = block.inner(area);
@@ -123,14 +139,20 @@ fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize)
         Paragraph::new(render_field(
             state.agent_subfield == 0,
             state.agent_subfield == 0 && state.editing,
-            "Name", &agent.name, &state.input,
+            "Name",
+            &agent.name,
+            &state.input,
         )),
         rows[0],
     );
 
     // Field 1: Coding agent (select)
     f.render_widget(
-        Paragraph::new(render_select_field(state.agent_subfield == 1, "Coding agent", &agent.coding_agent)),
+        Paragraph::new(render_select_field(
+            state.agent_subfield == 1,
+            "Coding agent",
+            &agent.coding_agent,
+        )),
         rows[1],
     );
 
@@ -139,14 +161,20 @@ fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize)
         Paragraph::new(render_field(
             state.agent_subfield == 2,
             state.agent_subfield == 2 && state.editing,
-            "Tags (comma-separated)", &tags_display, &state.input,
+            "Tags (comma-separated)",
+            &tags_display,
+            &state.input,
         )),
         rows[2],
     );
 
     // Field 3: Auth mode (select)
     f.render_widget(
-        Paragraph::new(render_select_field(state.agent_subfield == 3, "Auth", &agent.auth)),
+        Paragraph::new(render_select_field(
+            state.agent_subfield == 3,
+            "Auth",
+            &agent.auth,
+        )),
         rows[3],
     );
 
@@ -160,7 +188,9 @@ fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize)
                     Paragraph::new(render_field(
                         focused4,
                         focused4 && state.editing,
-                        "API Key (ANTHROPIC_API_KEY)", &key_display, &state.input,
+                        "API Key (ANTHROPIC_API_KEY)",
+                        &key_display,
+                        &state.input,
                     )),
                     rows[4],
                 );
@@ -168,7 +198,11 @@ fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize)
             "synced" if agent.coding_agent == "kilo" => {
                 let provider_display = kilo_provider_display(state, agent);
                 f.render_widget(
-                    Paragraph::new(render_select_field(focused4, "Kilo provider", &provider_display)),
+                    Paragraph::new(render_select_field(
+                        focused4,
+                        "Kilo provider",
+                        &provider_display,
+                    )),
                     rows[4],
                 );
             }
@@ -176,7 +210,9 @@ fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize)
                 // claude synced — show sync status, Enter/space re-reads
                 let status = claude_auth_status(agent);
                 let style = if focused4 {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -196,12 +232,18 @@ fn render_edit(f: &mut Frame, area: Rect, state: &ConfigWizardState, idx: usize)
     // Field 5: Endpoint URL (api_key only)
     if field_count >= 6 {
         let focused5 = state.agent_subfield == 5;
-        let endpoint_current = agent.env.get("ANTHROPIC_BASE_URL").map_or("", String::as_str).to_string();
+        let endpoint_current = agent
+            .env
+            .get("ANTHROPIC_BASE_URL")
+            .map_or("", String::as_str)
+            .to_string();
         f.render_widget(
             Paragraph::new(render_field(
                 focused5,
                 focused5 && state.editing,
-                "Endpoint URL (ANTHROPIC_BASE_URL)", &endpoint_current, &state.input,
+                "Endpoint URL (ANTHROPIC_BASE_URL)",
+                &endpoint_current,
+                &state.input,
             )),
             rows[5],
         );
@@ -223,7 +265,9 @@ fn handle_list(code: KeyCode, state: &mut ConfigWizardState) -> WizardCmd {
 
     match code {
         KeyCode::Char('j') | KeyCode::Down => {
-            if state.field_idx + 1 < max { state.field_idx += 1; }
+            if state.field_idx + 1 < max {
+                state.field_idx += 1;
+            }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             state.field_idx = state.field_idx.saturating_sub(1);
@@ -257,7 +301,9 @@ fn handle_edit(code: KeyCode, state: &mut ConfigWizardState) -> WizardCmd {
     if state.editing {
         match code {
             KeyCode::Char(c) => state.input.push(c),
-            KeyCode::Backspace => { state.input.pop(); }
+            KeyCode::Backspace => {
+                state.input.pop();
+            }
             KeyCode::Enter => commit_agent_field(state),
             KeyCode::Esc => state.stop_editing(),
             _ => {}
@@ -265,13 +311,16 @@ fn handle_edit(code: KeyCode, state: &mut ConfigWizardState) -> WizardCmd {
         return WizardCmd::Continue;
     }
 
-    let field_count = state.agent_edit
+    let field_count = state
+        .agent_edit
         .and_then(|i| state.config.agents.get(i))
         .map_or(4, agent_field_count);
 
     match code {
         KeyCode::Char('j') | KeyCode::Down => {
-            if state.agent_subfield + 1 < field_count { state.agent_subfield += 1; }
+            if state.agent_subfield + 1 < field_count {
+                state.agent_subfield += 1;
+            }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             state.agent_subfield = state.agent_subfield.saturating_sub(1);
@@ -295,11 +344,13 @@ fn handle_edit(code: KeyCode, state: &mut ConfigWizardState) -> WizardCmd {
         KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right
             if state.agent_subfield == 4 =>
         {
-            let auth = state.agent_edit
+            let auth = state
+                .agent_edit
                 .and_then(|i| state.config.agents.get(i))
                 .map(|a| a.auth.clone())
                 .unwrap_or_default();
-            let coding_agent = state.agent_edit
+            let coding_agent = state
+                .agent_edit
                 .and_then(|i| state.config.agents.get(i))
                 .map(|a| a.coding_agent.clone())
                 .unwrap_or_default();
@@ -358,20 +409,31 @@ fn add_agent(state: &mut ConfigWizardState) {
 }
 
 fn current_agent_field_value(state: &ConfigWizardState) -> String {
-    let Some(idx) = state.agent_edit else { return String::new() };
-    let Some(agent) = state.config.agents.get(idx) else { return String::new() };
+    let Some(idx) = state.agent_edit else {
+        return String::new();
+    };
+    let Some(agent) = state.config.agents.get(idx) else {
+        return String::new();
+    };
     match state.agent_subfield {
         0 => agent.name.clone(),
         2 => agent.tags.join(", "),
         4 if agent.auth == "api_key" => String::new(), // API key always starts blank for security
-        5 => agent.env.get("ANTHROPIC_BASE_URL").cloned().unwrap_or_default(),
+        5 => agent
+            .env
+            .get("ANTHROPIC_BASE_URL")
+            .cloned()
+            .unwrap_or_default(),
         _ => String::new(), // select fields have no text value
     }
 }
 
 fn commit_agent_field(state: &mut ConfigWizardState) {
     let input = state.input.trim().to_string();
-    let Some(idx) = state.agent_edit else { state.stop_editing(); return; };
+    let Some(idx) = state.agent_edit else {
+        state.stop_editing();
+        return;
+    };
     if let Some(agent) = state.config.agents.get_mut(idx) {
         match state.agent_subfield {
             0 => agent.name = input,
@@ -405,7 +467,10 @@ fn commit_agent_field(state: &mut ConfigWizardState) {
 fn agent_has_auth(agent: &Agent) -> bool {
     match agent.auth.as_str() {
         "synced" => true,
-        "api_key" => agent.env.get("ANTHROPIC_API_KEY").is_some_and(|v| !v.is_empty()),
+        "api_key" => agent
+            .env
+            .get("ANTHROPIC_API_KEY")
+            .is_some_and(|v| !v.is_empty()),
         _ => false,
     }
 }
@@ -423,7 +488,10 @@ fn agent_env_key_status(agent: &Agent, key: &str) -> String {
 fn cycle_coding_agent(state: &mut ConfigWizardState) {
     let Some(idx) = state.agent_edit else { return };
     if let Some(agent) = state.config.agents.get_mut(idx) {
-        let pos = CODING_AGENTS.iter().position(|&s| s == agent.coding_agent).unwrap_or(0);
+        let pos = CODING_AGENTS
+            .iter()
+            .position(|&s| s == agent.coding_agent)
+            .unwrap_or(0);
         let next = (pos + 1) % CODING_AGENTS.len();
         agent.coding_agent = CODING_AGENTS[next].to_string();
     }
@@ -434,7 +502,10 @@ fn cycle_coding_agent(state: &mut ConfigWizardState) {
 fn cycle_auth_mode(state: &mut ConfigWizardState) {
     let Some(idx) = state.agent_edit else { return };
     let (new_auth, is_kilo) = if let Some(agent) = state.config.agents.get_mut(idx) {
-        let pos = AUTH_MODES.iter().position(|&s| s == agent.auth).unwrap_or(0);
+        let pos = AUTH_MODES
+            .iter()
+            .position(|&s| s == agent.auth)
+            .unwrap_or(0);
         let next = (pos + 1) % AUTH_MODES.len();
         agent.auth = AUTH_MODES[next].to_string();
         (agent.auth.clone(), agent.coding_agent == "kilo")
@@ -451,7 +522,8 @@ fn cycle_auth_mode(state: &mut ConfigWizardState) {
         }
     }
     // Clamp subfield to new field count.
-    let field_count = state.agent_edit
+    let field_count = state
+        .agent_edit
         .and_then(|i| state.config.agents.get(i))
         .map_or(4, agent_field_count);
     if state.agent_subfield >= field_count {
@@ -464,8 +536,12 @@ fn load_kilo_providers() -> Vec<String> {
     let config_path = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/root"))
         .join(".kilocode/cli/config.json");
-    let Ok(raw) = std::fs::read_to_string(&config_path) else { return vec![] };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else { return vec![] };
+    let Ok(raw) = std::fs::read_to_string(&config_path) else {
+        return vec![];
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return vec![];
+    };
     json["providers"]
         .as_array()
         .map(|arr| {
@@ -507,15 +583,24 @@ fn write_kilo_provider_config(state: &mut ConfigWizardState) {
     let src_path = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/root"))
         .join(".kilocode/cli/config.json");
-    let Ok(raw) = std::fs::read_to_string(&src_path) else { return };
-    let Ok(src_json) = serde_json::from_str::<serde_json::Value>(&raw) else { return };
+    let Ok(raw) = std::fs::read_to_string(&src_path) else {
+        return;
+    };
+    let Ok(src_json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return;
+    };
     let provider_obj = src_json["providers"]
         .as_array()
         .and_then(|arr| arr.iter().find(|p| p["id"].as_str() == Some(&provider_id)));
-    let Some(mut provider) = provider_obj.cloned() else { return };
+    let Some(mut provider) = provider_obj.cloned() else {
+        return;
+    };
 
     if let Some(obj) = provider.as_object_mut() {
-        obj.insert("id".to_string(), serde_json::Value::String("default".to_string()));
+        obj.insert(
+            "id".to_string(),
+            serde_json::Value::String("default".to_string()),
+        );
     }
 
     let out = serde_json::json!({
@@ -537,7 +622,9 @@ fn sync_claude_auth(state: &mut ConfigWizardState) {
     let path = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/root"))
         .join(".claude.json");
-    let Ok(contents) = std::fs::read_to_string(&path) else { return };
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return;
+    };
     if let Some(agent) = state.config.agents.get_mut(idx) {
         agent.env.insert("CLAUDE_AUTH_JSON".to_string(), contents);
     }
@@ -545,7 +632,11 @@ fn sync_claude_auth(state: &mut ConfigWizardState) {
 
 /// Return a status string for the claude auth field.
 fn claude_auth_status(agent: &Agent) -> &'static str {
-    if agent.env.get("CLAUDE_AUTH_JSON").is_some_and(|v| !v.is_empty()) {
+    if agent
+        .env
+        .get("CLAUDE_AUTH_JSON")
+        .is_some_and(|v| !v.is_empty())
+    {
         "(synced from ~/.claude.json — Enter to re-sync)"
     } else {
         "(~/.claude.json not found — Enter to sync)"
@@ -556,7 +647,9 @@ fn claude_auth_status(agent: &Agent) -> &'static str {
 fn render_select_field<'a>(focused: bool, label: &'a str, value: &'a str) -> Line<'a> {
     let (prefix_style, value_style) = if focused {
         (
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
             Style::default().fg(Color::White),
         )
     } else {

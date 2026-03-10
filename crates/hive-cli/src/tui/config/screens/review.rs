@@ -2,17 +2,19 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 
 use crate::tui::config::state::{ConfigWizardState, WizardCmd};
 
 pub fn render(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
-    let block = Block::default().title(" Review — press Enter to save ").borders(Borders::ALL);
+    let block = Block::default()
+        .title(" Review — press Enter to save ")
+        .borders(Borders::ALL);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -46,13 +48,19 @@ pub fn render(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
         lines.push(field("(none)", String::new()));
     }
     for agent in &cfg.agents {
-        lines.push(field(&format!("  {}", agent.name), format!("{} [{}]", agent.coding_agent, agent.tags.join(","))));
+        lines.push(field(
+            &format!("  {}", agent.name),
+            format!("{} [{}]", agent.coding_agent, agent.tags.join(",")),
+        ));
     }
 
     lines.push(Line::default());
     lines.push(section("app"));
     lines.push(field("daemon_port", cfg.app.daemon_port.to_string()));
-    lines.push(field("daemon_host_port", cfg.app.daemon_host_port.to_string()));
+    lines.push(field(
+        "daemon_host_port",
+        cfg.app.daemon_host_port.to_string(),
+    ));
 
     lines.push(Line::default());
     lines.push(section("exec"));

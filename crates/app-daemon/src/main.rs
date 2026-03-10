@@ -6,7 +6,10 @@
 mod dev;
 mod exec;
 
-use axum::{Router, routing::{get, post}, Json};
+use axum::{
+    routing::{get, post},
+    Json, Router,
+};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -23,8 +26,8 @@ struct HiveConfig {
 }
 
 fn load_exec_config() -> ExecConfig {
-    let config_path = std::env::var("HIVE_CONFIG_PATH")
-        .unwrap_or_else(|_| "/app/.hive/config.toml".to_string());
+    let config_path =
+        std::env::var("HIVE_CONFIG_PATH").unwrap_or_else(|_| "/app/.hive/config.toml".to_string());
 
     match std::fs::read_to_string(&config_path) {
         Ok(content) => match toml::from_str::<HiveConfig>(&content) {
@@ -47,15 +50,12 @@ fn load_exec_config() -> ExecConfig {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
-    let filter = EnvFilter::new(format!(
-        "warn,app_daemon={level},hive_core={level}"
-    ));
+    let filter = EnvFilter::new(format!("warn,app_daemon={level},hive_core={level}"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     info!("App Daemon starting...");
 
-    let port = std::env::var("HIVE_APP_DAEMON_PORT")
-        .unwrap_or_else(|_| "8081".to_string());
+    let port = std::env::var("HIVE_APP_DAEMON_PORT").unwrap_or_else(|_| "8081".to_string());
 
     info!("  Port: {}", port);
 
@@ -72,8 +72,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/obs/logs", post(dev::logs))
         .with_state(exec_config);
 
-    let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
-        .await?;
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
 
     info!("App Daemon listening on port {}", port);
 
@@ -101,9 +100,7 @@ mod tests {
     use std::io::Write;
 
     fn parse_hive_config(toml: &str) -> ExecConfig {
-        toml::from_str::<HiveConfig>(toml)
-            .unwrap_or_default()
-            .exec
+        toml::from_str::<HiveConfig>(toml).unwrap_or_default().exec
     }
 
     fn load_from_file(content: &str) -> ExecConfig {
@@ -119,13 +116,22 @@ mod tests {
 
     #[test]
     fn test_missing_config_file_uses_defaults() {
-        std::env::set_var("HIVE_CONFIG_PATH", "/tmp/hive-nonexistent-config-99999.toml");
+        std::env::set_var(
+            "HIVE_CONFIG_PATH",
+            "/tmp/hive-nonexistent-config-99999.toml",
+        );
         let cfg = load_exec_config();
         std::env::remove_var("HIVE_CONFIG_PATH");
 
         // Default aliases must be present.
-        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"));
-        assert_eq!(cfg.commands.get("build").map(String::as_str), Some("pnpm build"));
+        assert_eq!(
+            cfg.commands.get("test").map(String::as_str),
+            Some("pnpm test")
+        );
+        assert_eq!(
+            cfg.commands.get("build").map(String::as_str),
+            Some("pnpm build")
+        );
     }
 
     #[test]
@@ -136,8 +142,14 @@ commands = { "test" = "cargo test", "build" = "cargo build --release" }
 run_prefixes = ["cargo"]
 "#;
         let cfg = load_from_file(toml);
-        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("cargo test"));
-        assert_eq!(cfg.commands.get("build").map(String::as_str), Some("cargo build --release"));
+        assert_eq!(
+            cfg.commands.get("test").map(String::as_str),
+            Some("cargo test")
+        );
+        assert_eq!(
+            cfg.commands.get("build").map(String::as_str),
+            Some("cargo build --release")
+        );
         assert_eq!(cfg.run_prefixes, vec!["cargo"]);
     }
 
@@ -148,17 +160,25 @@ run_prefixes = ["cargo"]
         // Default values, NOT the type-level defaults (e.g. HashMap::new()).
         // So specifying only run_prefixes still preserves the default command aliases.
         let cfg = parse_hive_config("[exec]\nrun_prefixes = [\"cargo\"]");
-        assert!(!cfg.commands.is_empty(),
-            "Struct-level #[serde(default)] preserves default command aliases for missing fields");
-        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"));
+        assert!(
+            !cfg.commands.is_empty(),
+            "Struct-level #[serde(default)] preserves default command aliases for missing fields"
+        );
+        assert_eq!(
+            cfg.commands.get("test").map(String::as_str),
+            Some("pnpm test")
+        );
         assert_eq!(cfg.run_prefixes, vec!["cargo"]);
     }
 
     #[test]
     fn test_malformed_toml_falls_back_to_defaults() {
         let cfg = load_from_file("this is not [ valid toml {{{{");
-        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"),
-            "malformed TOML should fall back to defaults");
+        assert_eq!(
+            cfg.commands.get("test").map(String::as_str),
+            Some("pnpm test"),
+            "malformed TOML should fall back to defaults"
+        );
     }
 
     #[test]
@@ -166,8 +186,14 @@ run_prefixes = ["cargo"]
         // [exec] present but empty → struct-level #[serde(default)] kicks in for all fields.
         // ExecConfig::default() is used, so all aliases and run_prefixes are present.
         let cfg = parse_hive_config("[exec]");
-        assert!(!cfg.commands.is_empty(), "empty [exec] should still have default aliases");
-        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"));
+        assert!(
+            !cfg.commands.is_empty(),
+            "empty [exec] should still have default aliases"
+        );
+        assert_eq!(
+            cfg.commands.get("test").map(String::as_str),
+            Some("pnpm test")
+        );
         assert!(!cfg.run_prefixes.is_empty());
     }
 
@@ -175,7 +201,10 @@ run_prefixes = ["cargo"]
     fn test_no_exec_section_uses_struct_default() {
         // No [exec] section at all → HiveConfig uses #[serde(default)] → ExecConfig::default().
         let cfg = parse_hive_config("[other_section]\nfoo = 1");
-        assert_eq!(cfg.commands.get("test").map(String::as_str), Some("pnpm test"),
-            "missing [exec] section should use ExecConfig::default()");
+        assert_eq!(
+            cfg.commands.get("test").map(String::as_str),
+            Some("pnpm test"),
+            "missing [exec] section should use ExecConfig::default()"
+        );
     }
 }

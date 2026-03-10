@@ -6,9 +6,9 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     widgets::{Block, Borders},
+    Frame,
 };
 
 use super::render_field;
@@ -32,7 +32,9 @@ fn field_count(state: &ConfigWizardState) -> usize {
 }
 
 pub fn render(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
-    let block = Block::default().title(" Exec Configuration ").borders(Borders::ALL);
+    let block = Block::default()
+        .title(" Exec Configuration ")
+        .borders(Borders::ALL);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -66,7 +68,9 @@ pub fn handle(code: KeyCode, _mods: KeyModifiers, state: &mut ConfigWizardState)
     if state.editing {
         match code {
             KeyCode::Char(c) => state.input.push(c),
-            KeyCode::Backspace => { state.input.pop(); }
+            KeyCode::Backspace => {
+                state.input.pop();
+            }
             KeyCode::Enter => commit(state),
             KeyCode::Esc => state.stop_editing(),
             _ => {}
@@ -77,7 +81,9 @@ pub fn handle(code: KeyCode, _mods: KeyModifiers, state: &mut ConfigWizardState)
     let max = field_count(state);
     match code {
         KeyCode::Char('j') | KeyCode::Down => {
-            if state.field_idx + 1 < max { state.field_idx += 1; }
+            if state.field_idx + 1 < max {
+                state.field_idx += 1;
+            }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             state.field_idx = state.field_idx.saturating_sub(1);

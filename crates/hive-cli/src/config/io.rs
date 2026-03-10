@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{Config, GlobalConfig, CONFIG_VERSION, migrate_config};
+use super::{migrate_config, Config, GlobalConfig, CONFIG_VERSION};
 
 /// Default config file path: `<project_dir>/.hive/config.toml`
 pub fn default_path(project_dir: &Path) -> PathBuf {
@@ -23,8 +23,8 @@ pub fn load(path: &Path) -> Result<Config> {
     if !path.exists() {
         return Ok(Config::default());
     }
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("reading config from {:?}", path))?;
+    let raw =
+        std::fs::read_to_string(path).with_context(|| format!("reading config from {:?}", path))?;
     let cfg: Config = toml::from_str(&raw).with_context(|| format!("parsing config {:?}", path))?;
     if cfg.version < CONFIG_VERSION {
         Ok(migrate_config(cfg))

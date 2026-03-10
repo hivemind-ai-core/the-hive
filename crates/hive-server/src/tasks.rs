@@ -150,11 +150,13 @@ pub fn get_next(pool: &DbPool, agent_id: &str, tag: Option<&str>) -> Result<Opti
 /// Returns the number of tasks reset.
 pub fn reset_in_progress_for_agent(pool: &DbPool, agent_id: &str) -> Result<usize> {
     let conn = pool.get()?;
-    let count = conn.execute(
-        "UPDATE tasks SET status=?2, assigned_agent_id=NULL, updated_at=datetime('now')
+    let count = conn
+        .execute(
+            "UPDATE tasks SET status=?2, assigned_agent_id=NULL, updated_at=datetime('now')
          WHERE status=?3 AND assigned_agent_id=?1",
-        rusqlite::params![agent_id, STATUS_PENDING, STATUS_IN_PROGRESS],
-    ).context("resetting orphaned tasks")?;
+            rusqlite::params![agent_id, STATUS_PENDING, STATUS_IN_PROGRESS],
+        )
+        .context("resetting orphaned tasks")?;
     Ok(count)
 }
 
@@ -170,8 +172,7 @@ pub fn complete(pool: &DbPool, task_id: &str, result: Option<String>) -> Result<
         .context("completing task")?;
     } // release lock before calling get_task
 
-    get_task(pool, task_id)?
-        .ok_or_else(|| anyhow::anyhow!("task not found after complete"))
+    get_task(pool, task_id)?.ok_or_else(|| anyhow::anyhow!("task not found after complete"))
 }
 
 pub fn insert_dependency(pool: &DbPool, task_id: &str, depends_on_id: &str) -> Result<()> {
@@ -235,7 +236,6 @@ pub fn list_tasks(
     rows.map(|r| r.context("reading task row")).collect()
 }
 
-
 // -- helpers --
 
 fn str_to_status(s: &str) -> TaskStatus {
@@ -283,8 +283,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 /// Split a task into ordered subtasks. The original is cancelled.
 /// Returns the newly created subtasks in order.
 pub fn split(pool: &DbPool, parent_id: &str, subtasks: Vec<Task>) -> Result<Vec<Task>> {
-    get_task(pool, parent_id)?
-        .ok_or_else(|| anyhow::anyhow!("task not found: {parent_id}"))?;
+    get_task(pool, parent_id)?.ok_or_else(|| anyhow::anyhow!("task not found: {parent_id}"))?;
 
     let mut created: Vec<Task> = Vec::with_capacity(subtasks.len());
     let mut prev_id: Option<String> = None;
@@ -332,17 +331,15 @@ fn topological_reorder(pool: &DbPool) -> Result<()> {
 
     let conn = pool.get()?;
 
-    let active_sql = format!(
-        "SELECT id FROM tasks WHERE status NOT IN ('{STATUS_DONE}','{STATUS_CANCELLED}')"
-    );
+    let active_sql =
+        format!("SELECT id FROM tasks WHERE status NOT IN ('{STATUS_DONE}','{STATUS_CANCELLED}')");
     let mut stmt = conn.prepare(&active_sql)?;
     let ids: Vec<String> = stmt
         .query_map([], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     drop(stmt);
 
-    let mut in_degree: HashMap<String, usize> =
-        ids.iter().map(|id| (id.clone(), 0)).collect();
+    let mut in_degree: HashMap<String, usize> = ids.iter().map(|id| (id.clone(), 0)).collect();
     let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
 
     {
@@ -512,7 +509,9 @@ mod tests {
         let pool = open_test_db();
         let task = make_task("Work Item");
         insert_task(&pool, &task).unwrap();
-        let claimed = get_next(&pool, "agent-1", None).unwrap().expect("should get a task");
+        let claimed = get_next(&pool, "agent-1", None)
+            .unwrap()
+            .expect("should get a task");
         assert_eq!(claimed.id, task.id);
         assert_eq!(claimed.status, TaskStatus::InProgress);
         assert_eq!(claimed.assigned_agent_id.as_deref(), Some("agent-1"));
@@ -527,11 +526,16 @@ mod tests {
         insert_task(&pool, &blocked).unwrap();
         set_dependency(&pool, &blocked.id, &dep.id).unwrap();
         // Only the dependency is claimable.
-        let first = get_next(&pool, "agent-1", None).unwrap().expect("should get dep");
+        let first = get_next(&pool, "agent-1", None)
+            .unwrap()
+            .expect("should get dep");
         assert_eq!(first.id, dep.id);
         // Dependency is in-progress, not done → blocked task still unavailable.
         let second = get_next(&pool, "agent-2", None).unwrap();
-        assert!(second.is_none(), "blocked task should not be claimable while dep is in-progress");
+        assert!(
+            second.is_none(),
+            "blocked task should not be claimable while dep is in-progress"
+        );
     }
 
     #[test]
@@ -544,7 +548,9 @@ mod tests {
         set_dependency(&pool, &work.id, &dep.id).unwrap();
         get_next(&pool, "agent-1", None).unwrap(); // claims dep
         complete(&pool, &dep.id, None).unwrap();
-        let next = get_next(&pool, "agent-2", None).unwrap().expect("should be unblocked");
+        let next = get_next(&pool, "agent-2", None)
+            .unwrap()
+            .expect("should be unblocked");
         assert_eq!(next.id, work.id);
     }
 
@@ -553,7 +559,9 @@ mod tests {
         let pool = open_test_db();
         insert_task(&pool, &make_tagged_task("Rust Task", &["rust"])).unwrap();
         insert_task(&pool, &make_tagged_task("Python Task", &["python"])).unwrap();
-        let claimed = get_next(&pool, "agent-rust", Some("rust")).unwrap().expect("should get task");
+        let claimed = get_next(&pool, "agent-rust", Some("rust"))
+            .unwrap()
+            .expect("should get task");
         assert_eq!(claimed.title, "Rust Task");
         // Python task stays pending.
         let remaining = list_tasks(&pool, Some("pending"), None, None).unwrap();
@@ -642,7 +650,12 @@ mod tests {
         let pool = open_test_db();
         let parent = make_task("Parent");
         insert_task(&pool, &parent).unwrap();
-        let created = split(&pool, &parent.id, vec![make_task("S1"), make_task("S2"), make_task("S3")]).unwrap();
+        let created = split(
+            &pool,
+            &parent.id,
+            vec![make_task("S1"), make_task("S2"), make_task("S3")],
+        )
+        .unwrap();
         assert_eq!(created.len(), 3);
         let p = get_task(&pool, &parent.id).unwrap().unwrap();
         assert_eq!(p.status, TaskStatus::Cancelled);
@@ -659,7 +672,9 @@ mod tests {
         let s2_id = s2.id.clone();
         split(&pool, &parent.id, vec![s1, s2]).unwrap();
         // S1 has no deps → claimable first.
-        let first = get_next(&pool, "agent", None).unwrap().expect("should get S1");
+        let first = get_next(&pool, "agent", None)
+            .unwrap()
+            .expect("should get S1");
         assert_eq!(first.id, s1_id);
         // S2 depends on S1 which is in-progress → not claimable.
         let second = get_next(&pool, "agent2", None).unwrap();
@@ -710,7 +725,7 @@ mod tests {
         insert_task(&pool, &b).unwrap();
         set_dependency(&pool, &a.id, &b.id).unwrap();
         let _ = set_dependency(&pool, &b.id, &a.id); // cycle, should fail
-        // A should still have exactly one dependency (b), and b should have none.
+                                                     // A should still have exactly one dependency (b), and b should have none.
         let conn = pool.get().unwrap();
         let a_dep_count: i64 = conn
             .query_row(

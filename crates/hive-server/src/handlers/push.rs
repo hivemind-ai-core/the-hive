@@ -90,10 +90,16 @@ mod tests {
     fn send_stores_message() {
         let pool = open_test_db();
         let registry = agent_registry::new_registry();
-        let result = send(&pool, &registry, "agent-a", Some(json!({
-            "to_agent_id": "agent-b",
-            "content": "Hello!"
-        }))).unwrap();
+        let result = send(
+            &pool,
+            &registry,
+            "agent-a",
+            Some(json!({
+                "to_agent_id": "agent-b",
+                "content": "Hello!"
+            })),
+        )
+        .unwrap();
         assert!(result["id"].is_string());
     }
 
@@ -115,7 +121,13 @@ mod tests {
     fn send_empty_to_agent_id_errors() {
         let pool = open_test_db();
         let registry = agent_registry::new_registry();
-        assert!(send(&pool, &registry, "a", Some(json!({"to_agent_id": "  ", "content": "hi"}))).is_err());
+        assert!(send(
+            &pool,
+            &registry,
+            "a",
+            Some(json!({"to_agent_id": "  ", "content": "hi"}))
+        )
+        .is_err());
     }
 
     #[test]
@@ -138,7 +150,13 @@ mod tests {
     fn list_returns_pending_messages() {
         let pool = open_test_db();
         let registry = agent_registry::new_registry();
-        send(&pool, &registry, "a", Some(json!({"to_agent_id": "b", "content": "hi"}))).unwrap();
+        send(
+            &pool,
+            &registry,
+            "a",
+            Some(json!({"to_agent_id": "b", "content": "hi"})),
+        )
+        .unwrap();
         let result = list(&pool, "b").unwrap();
         assert_eq!(result.as_array().unwrap().len(), 1);
         assert_eq!(result[0]["content"], "hi");
@@ -148,7 +166,13 @@ mod tests {
     fn list_scoped_to_recipient() {
         let pool = open_test_db();
         let registry = agent_registry::new_registry();
-        send(&pool, &registry, "a", Some(json!({"to_agent_id": "b", "content": "for b"}))).unwrap();
+        send(
+            &pool,
+            &registry,
+            "a",
+            Some(json!({"to_agent_id": "b", "content": "for b"})),
+        )
+        .unwrap();
         let result = list(&pool, "c").unwrap();
         assert!(result.as_array().unwrap().is_empty());
     }
@@ -159,7 +183,13 @@ mod tests {
     fn ack_marks_messages_delivered() {
         let pool = open_test_db();
         let registry = agent_registry::new_registry();
-        let msg = send(&pool, &registry, "a", Some(json!({"to_agent_id": "b", "content": "hi"}))).unwrap();
+        let msg = send(
+            &pool,
+            &registry,
+            "a",
+            Some(json!({"to_agent_id": "b", "content": "hi"})),
+        )
+        .unwrap();
         let msg_id = msg["id"].as_str().unwrap();
 
         let result = ack(&pool, Some(json!({"message_ids": [msg_id]}))).unwrap();

@@ -14,9 +14,19 @@ async fn two_agents_claim_distinct_tasks() {
 
     // Create two tasks
     let id1 = call(&mut ws_a, "task.create", json!({"title": "Task One"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let id2 = call(&mut ws_a, "task.create", json!({"title": "Task Two"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Both agents claim (sequentially; get_next is serialized via DB mutex)
     let claim_a = call(&mut ws_a, "task.get_next", json!({})).await;
@@ -29,8 +39,9 @@ async fn two_agents_claim_distinct_tasks() {
     assert_ne!(task_a_id, task_b_id);
 
     // Together they cover both created tasks
-    let claimed: std::collections::HashSet<&str> =
-        [task_a_id.as_str(), task_b_id.as_str()].into_iter().collect();
+    let claimed: std::collections::HashSet<&str> = [task_a_id.as_str(), task_b_id.as_str()]
+        .into_iter()
+        .collect();
     assert!(claimed.contains(id1.as_str()));
     assert!(claimed.contains(id2.as_str()));
 }
@@ -42,10 +53,15 @@ async fn cross_agent_push_delivery() {
     let mut ws_a = connect(addr, "agent-29a").await;
 
     // A sends to B while B is disconnected → stored as undelivered
-    let res = call(&mut ws_a, "push.send", json!({
-        "to_agent_id": "agent-29b",
-        "content": "Cross-agent message"
-    })).await;
+    let res = call(
+        &mut ws_a,
+        "push.send",
+        json!({
+            "to_agent_id": "agent-29b",
+            "content": "Cross-agent message"
+        }),
+    )
+    .await;
     assert!(res.error.is_none(), "push.send failed: {:?}", res.error);
 
     // B connects and retrieves
@@ -68,10 +84,15 @@ async fn cross_agent_topic_wait() {
     let mut ws_b = connect(addr, "agent-30b").await;
 
     // Agent A creates a topic
-    let res = call(&mut ws_a, "topic.create", json!({
-        "title": "Shared Topic",
-        "content": "Waiting for replies"
-    })).await;
+    let res = call(
+        &mut ws_a,
+        "topic.create",
+        json!({
+            "title": "Shared Topic",
+            "content": "Waiting for replies"
+        }),
+    )
+    .await;
     let topic_id = res.result.unwrap()["id"].as_str().unwrap().to_string();
 
     // Spawn Agent A to post a comment after a short delay (new WS to avoid borrow conflict)
@@ -80,19 +101,33 @@ async fn cross_agent_topic_wait() {
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         let mut poster = connect(addr_clone, "agent-30a-poster").await;
-        call(&mut poster, "topic.comment", json!({
-            "topic_id": &topic_id_clone,
-            "content": "Agent A replied!"
-        })).await;
+        call(
+            &mut poster,
+            "topic.comment",
+            json!({
+                "topic_id": &topic_id_clone,
+                "content": "Agent A replied!"
+            }),
+        )
+        .await;
     });
 
     // Agent B waits for a new comment
-    let res = call(&mut ws_b, "topic.wait", json!({
-        "id": &topic_id,
-        "since_count": 0,
-        "timeout_secs": 5
-    })).await;
-    assert!(res.error.is_none(), "topic.wait should resolve: {:?}", res.error);
+    let res = call(
+        &mut ws_b,
+        "topic.wait",
+        json!({
+            "id": &topic_id,
+            "since_count": 0,
+            "timeout_secs": 5
+        }),
+    )
+    .await;
+    assert!(
+        res.error.is_none(),
+        "topic.wait should resolve: {:?}",
+        res.error
+    );
     let result = res.result.unwrap();
     let comments = result["comments"].as_array().unwrap();
     assert!(!comments.is_empty());

@@ -3,7 +3,7 @@
 pub mod io;
 mod validate;
 
-pub use io::{load, save, load_global, save_global, global_config_path};
+pub use io::{global_config_path, load, load_global, save, save_global};
 pub use validate::validate;
 
 /// Current config file format version. Bump when making breaking schema changes.
@@ -113,7 +113,6 @@ impl Default for Config {
     }
 }
 
-
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -123,7 +122,6 @@ impl Default for ServerConfig {
         }
     }
 }
-
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -142,11 +140,7 @@ impl Default for ExecConfig {
                 ("check".to_string(), "pnpm exec tsc --noEmit".to_string()),
                 ("build".to_string(), "pnpm build".to_string()),
             ]),
-            run_prefixes: vec![
-                "cargo".to_string(),
-                "npm".to_string(),
-                "pnpm".to_string(),
-            ],
+            run_prefixes: vec!["cargo".to_string(), "npm".to_string(), "pnpm".to_string()],
         }
     }
 }

@@ -29,7 +29,9 @@ pub fn next_action(timeout: Duration, text_mode: bool) -> Result<Action> {
         return Ok(Action::None);
     }
     match event::read()? {
-        Event::Key(KeyEvent { code, modifiers, .. }) => Ok(map_key(code, modifiers, text_mode)),
+        Event::Key(KeyEvent {
+            code, modifiers, ..
+        }) => Ok(map_key(code, modifiers, text_mode)),
         _ => Ok(Action::None),
     }
 }

@@ -1,11 +1,11 @@
 //! Dashboard screen: agent status + task queue preview.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table},
+    Frame,
 };
 
 use super::app::{App, Screen};
@@ -23,7 +23,9 @@ pub fn render_header(f: &mut Frame, area: Rect, app: &App) {
         .iter()
         .flat_map(|(label, screen)| {
             let style = if &app.screen == screen {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
@@ -58,8 +60,7 @@ fn render_agents(f: &mut Frame, area: Rect, state: &AppState) {
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            Row::new(vec![a.name.clone(), "connected".to_string()])
-                .style(status_style)
+            Row::new(vec![a.name.clone(), "connected".to_string()]).style(status_style)
         })
         .collect();
     let table = Table::new(
@@ -89,11 +90,13 @@ fn render_tasks(f: &mut Frame, area: Rect, state: &AppState) {
                 _ => Color::White,
             };
             ListItem::new(Line::from(vec![
-                Span::styled(format!("[{}] ", t.status), Style::default().fg(status_color)),
+                Span::styled(
+                    format!("[{}] ", t.status),
+                    Style::default().fg(status_color),
+                ),
                 Span::raw(&t.title),
             ]))
         })
         .collect();
     f.render_widget(List::new(items).block(block), area);
 }
-

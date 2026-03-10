@@ -11,15 +11,30 @@ async fn dep_blocks_task_from_being_claimed() {
     let mut ws = connect(addr, "agent-10").await;
 
     let id_a = call(&mut ws, "task.create", json!({"title": "Task A"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let id_b = call(&mut ws, "task.create", json!({"title": "Task B"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // B depends on A
-    let res = call(&mut ws, "task.set_dependency", json!({
-        "task_id": &id_b,
-        "depends_on_id": &id_a
-    })).await;
+    let res = call(
+        &mut ws,
+        "task.set_dependency",
+        json!({
+            "task_id": &id_b,
+            "depends_on_id": &id_a
+        }),
+    )
+    .await;
     assert!(res.error.is_none());
 
     // get_next should claim A (B is blocked by unfinished dep)
@@ -40,14 +55,29 @@ async fn dep_unblocks_when_satisfied() {
     let mut ws = connect(addr, "agent-11").await;
 
     let id_a = call(&mut ws, "task.create", json!({"title": "Dep A"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let id_b = call(&mut ws, "task.create", json!({"title": "Dep B"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    call(&mut ws, "task.set_dependency", json!({
-        "task_id": &id_b,
-        "depends_on_id": &id_a
-    })).await;
+    call(
+        &mut ws,
+        "task.set_dependency",
+        json!({
+            "task_id": &id_b,
+            "depends_on_id": &id_a
+        }),
+    )
+    .await;
 
     // Claim A
     let res = call(&mut ws, "task.get_next", json!({})).await;
@@ -71,24 +101,48 @@ async fn set_dependency_reorders_positions() {
 
     // Create child first, then parent (wrong order intentionally)
     let id_child = call(&mut ws, "task.create", json!({"title": "Child Task"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let id_parent = call(&mut ws, "task.create", json!({"title": "Parent Task"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Child depends on parent → parent must come first in topological order
-    let res = call(&mut ws, "task.set_dependency", json!({
-        "task_id": &id_child,
-        "depends_on_id": &id_parent
-    })).await;
+    let res = call(
+        &mut ws,
+        "task.set_dependency",
+        json!({
+            "task_id": &id_child,
+            "depends_on_id": &id_parent
+        }),
+    )
+    .await;
     assert!(res.error.is_none());
 
     // task.list returns tasks in position order; parent should precede child
     let res = call(&mut ws, "task.list", json!({})).await;
     let tasks = res.result.unwrap();
     let tasks = tasks.as_array().unwrap();
-    let parent_pos = tasks.iter().position(|t| t["id"] == id_parent.as_str()).unwrap();
-    let child_pos = tasks.iter().position(|t| t["id"] == id_child.as_str()).unwrap();
-    assert!(parent_pos < child_pos, "parent should precede child after topo reorder");
+    let parent_pos = tasks
+        .iter()
+        .position(|t| t["id"] == id_parent.as_str())
+        .unwrap();
+    let child_pos = tasks
+        .iter()
+        .position(|t| t["id"] == id_child.as_str())
+        .unwrap();
+    assert!(
+        parent_pos < child_pos,
+        "parent should precede child after topo reorder"
+    );
 }
 
 // AT-13: In-progress task set as dependency of itself is rejected (cycle)
@@ -98,21 +152,44 @@ async fn dep_cycle_is_rejected() {
     let mut ws = connect(addr, "agent-13").await;
 
     let id_a = call(&mut ws, "task.create", json!({"title": "Task A"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let id_b = call(&mut ws, "task.create", json!({"title": "Task B"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // A depends on B (valid)
-    let res = call(&mut ws, "task.set_dependency", json!({
-        "task_id": &id_a,
-        "depends_on_id": &id_b
-    })).await;
+    let res = call(
+        &mut ws,
+        "task.set_dependency",
+        json!({
+            "task_id": &id_a,
+            "depends_on_id": &id_b
+        }),
+    )
+    .await;
     assert!(res.error.is_none(), "first dep should succeed");
 
     // B depends on A → cycle, should be rejected
-    let res = call(&mut ws, "task.set_dependency", json!({
-        "task_id": &id_b,
-        "depends_on_id": &id_a
-    })).await;
-    assert!(res.error.is_some(), "cycle should be rejected with an error");
+    let res = call(
+        &mut ws,
+        "task.set_dependency",
+        json!({
+            "task_id": &id_b,
+            "depends_on_id": &id_a
+        }),
+    )
+    .await;
+    assert!(
+        res.error.is_some(),
+        "cycle should be rejected with an error"
+    );
 }

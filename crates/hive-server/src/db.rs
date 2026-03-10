@@ -17,7 +17,9 @@ pub struct DbPool(Arc<Mutex<Connection>>);
 impl DbPool {
     /// Acquire the database connection.
     pub fn get(&self) -> Result<MutexGuard<'_, Connection>> {
-        self.0.lock().map_err(|_| anyhow::anyhow!("DB lock poisoned"))
+        self.0
+            .lock()
+            .map_err(|_| anyhow::anyhow!("DB lock poisoned"))
     }
 }
 
@@ -30,8 +32,8 @@ pub fn open(db_path: &str) -> Result<DbPool> {
         }
     }
 
-    let conn = Connection::open(db_path)
-        .with_context(|| format!("opening database at {db_path}"))?;
+    let conn =
+        Connection::open(db_path).with_context(|| format!("opening database at {db_path}"))?;
 
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
         .context("setting PRAGMAs")?;

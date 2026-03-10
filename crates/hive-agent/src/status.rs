@@ -44,10 +44,7 @@ pub fn spawn_watchdog(cmd_tx: UnboundedSender<ClientCmd>, last_status: LastStatu
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(WATCHDOG_CHECK).await;
-            let elapsed = last_status
-                .lock()
-                .map(|t| t.elapsed())
-                .unwrap_or_default();
+            let elapsed = last_status.lock().map(|t| t.elapsed()).unwrap_or_default();
             if elapsed >= WATCHDOG_INTERVAL {
                 let msg = request("agent.heartbeat", None);
                 if cmd_tx.send(ClientCmd::Send(msg)).is_err() {

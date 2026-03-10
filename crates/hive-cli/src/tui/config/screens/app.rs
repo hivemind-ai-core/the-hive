@@ -2,9 +2,9 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     widgets::{Block, Borders},
+    Frame,
 };
 
 use super::render_field;
@@ -13,7 +13,9 @@ use crate::tui::config::state::{ConfigWizardState, WizardCmd};
 const FIELDS: usize = 2;
 
 pub fn render(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
-    let block = Block::default().title(" App Daemon Configuration ").borders(Borders::ALL);
+    let block = Block::default()
+        .title(" App Daemon Configuration ")
+        .borders(Borders::ALL);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -27,7 +29,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &ConfigWizardState) {
 
     let fields = [
         ("Daemon port (container)", cfg.daemon_port.to_string()),
-        ("Daemon host port (exposed)", cfg.daemon_host_port.to_string()),
+        (
+            "Daemon host port (exposed)",
+            cfg.daemon_host_port.to_string(),
+        ),
     ];
 
     for (i, (label, value)) in fields.iter().enumerate() {
@@ -42,7 +47,9 @@ pub fn handle(code: KeyCode, _mods: KeyModifiers, state: &mut ConfigWizardState)
     if state.editing {
         match code {
             KeyCode::Char(c) => state.input.push(c),
-            KeyCode::Backspace => { state.input.pop(); }
+            KeyCode::Backspace => {
+                state.input.pop();
+            }
             KeyCode::Enter => commit(state),
             KeyCode::Esc => state.stop_editing(),
             _ => {}
@@ -52,7 +59,9 @@ pub fn handle(code: KeyCode, _mods: KeyModifiers, state: &mut ConfigWizardState)
 
     match code {
         KeyCode::Char('j') | KeyCode::Down => {
-            if state.field_idx + 1 < FIELDS { state.field_idx += 1; }
+            if state.field_idx + 1 < FIELDS {
+                state.field_idx += 1;
+            }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             state.field_idx = state.field_idx.saturating_sub(1);
@@ -80,8 +89,16 @@ fn current_value(state: &ConfigWizardState) -> String {
 fn commit(state: &mut ConfigWizardState) {
     let input = state.input.trim().to_string();
     match state.field_idx {
-        0 => { if let Ok(v) = input.parse::<u16>() { state.config.app.daemon_port = v; } }
-        1 => { if let Ok(v) = input.parse::<u16>() { state.config.app.daemon_host_port = v; } }
+        0 => {
+            if let Ok(v) = input.parse::<u16>() {
+                state.config.app.daemon_port = v;
+            }
+        }
+        1 => {
+            if let Ok(v) = input.parse::<u16>() {
+                state.config.app.daemon_host_port = v;
+            }
+        }
         _ => {}
     }
     state.stop_editing();

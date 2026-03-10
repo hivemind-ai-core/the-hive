@@ -11,12 +11,22 @@ async fn split_cancels_original() {
     let mut ws = connect(addr, "agent-14").await;
 
     let id = call(&mut ws, "task.create", json!({"title": "To Split"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    let res = call(&mut ws, "task.split", json!({
-        "id": &id,
-        "subtasks": ["Sub One", "Sub Two"]
-    })).await;
+    let res = call(
+        &mut ws,
+        "task.split",
+        json!({
+            "id": &id,
+            "subtasks": ["Sub One", "Sub Two"]
+        }),
+    )
+    .await;
     assert!(res.error.is_none(), "split failed: {:?}", res.error);
 
     // Original should be cancelled
@@ -33,12 +43,22 @@ async fn split_creates_ordered_subtasks() {
     let mut ws = connect(addr, "agent-15").await;
 
     let id = call(&mut ws, "task.create", json!({"title": "To Split"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    let res = call(&mut ws, "task.split", json!({
-        "id": &id,
-        "subtasks": ["First Sub", "Second Sub", "Third Sub"]
-    })).await;
+    let res = call(
+        &mut ws,
+        "task.split",
+        json!({
+            "id": &id,
+            "subtasks": ["First Sub", "Second Sub", "Third Sub"]
+        }),
+    )
+    .await;
     assert!(res.error.is_none(), "split failed: {:?}", res.error);
     let subtasks = res.result.unwrap();
     let subtasks = subtasks.as_array().unwrap();
@@ -58,12 +78,22 @@ async fn split_subtasks_are_claimable() {
     let mut ws = connect(addr, "agent-16").await;
 
     let id = call(&mut ws, "task.create", json!({"title": "To Split"}))
-        .await.result.unwrap()["id"].as_str().unwrap().to_string();
+        .await
+        .result
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    let res = call(&mut ws, "task.split", json!({
-        "id": &id,
-        "subtasks": ["Sub One", "Sub Two"]
-    })).await;
+    let res = call(
+        &mut ws,
+        "task.split",
+        json!({
+            "id": &id,
+            "subtasks": ["Sub One", "Sub Two"]
+        }),
+    )
+    .await;
     assert!(res.error.is_none());
     let subtasks = res.result.unwrap();
     let sub1_id = subtasks[0]["id"].as_str().unwrap().to_string();

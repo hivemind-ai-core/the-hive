@@ -8,10 +8,7 @@ use serde_json::Value;
 use tracing::info;
 
 use crate::{
-    agent_registry::AgentRegistry,
-    communication as db_comm,
-    db::DbPool,
-    tasks as db_tasks,
+    agent_registry::AgentRegistry, communication as db_comm, db::DbPool, tasks as db_tasks,
 };
 
 #[derive(Deserialize)]
@@ -24,7 +21,9 @@ struct RegisterParams {
     capacity_max: u8,
 }
 
-fn default_capacity_max() -> u8 { 1 }
+fn default_capacity_max() -> u8 {
+    1
+}
 
 #[derive(Deserialize)]
 struct StatusParams {
@@ -84,10 +83,17 @@ pub fn register(pool: &DbPool, registry: &AgentRegistry, params: Option<Value>) 
 ///
 /// Updates in-memory registry. Triggers `try_dispatch` when the agent has
 /// capacity (`active_tasks` dropped below `capacity_max`).
-pub fn status(registry: &AgentRegistry, _pool: &DbPool, agent_id: &str, params: Option<Value>) -> Result<Value> {
+pub fn status(
+    registry: &AgentRegistry,
+    _pool: &DbPool,
+    agent_id: &str,
+    params: Option<Value>,
+) -> Result<Value> {
     let p: StatusParams = serde_json::from_value(params.unwrap_or(Value::Null))?;
 
-    let mut agents = registry.lock().map_err(|_| anyhow::anyhow!("registry lock poisoned"))?;
+    let mut agents = registry
+        .lock()
+        .map_err(|_| anyhow::anyhow!("registry lock poisoned"))?;
     let state = agents
         .get_mut(agent_id)
         .ok_or_else(|| anyhow::anyhow!("agent not found in registry"))?;
@@ -112,7 +118,12 @@ mod tests {
         pool
     }
 
-    fn setup_registry_with_agent(id: &str) -> (crate::agent_registry::AgentRegistry, mpsc::UnboundedReceiver<axum::extract::ws::Message>) {
+    fn setup_registry_with_agent(
+        id: &str,
+    ) -> (
+        crate::agent_registry::AgentRegistry,
+        mpsc::UnboundedReceiver<axum::extract::ws::Message>,
+    ) {
         let registry = agent_registry::new_registry();
         let (tx, rx) = mpsc::unbounded_channel();
         let state = agent_registry::AgentState::new(id.to_string(), tx);
@@ -136,10 +147,15 @@ mod tests {
         let pool = open_test_db();
         let (registry, _rx) = setup_registry_with_agent("agent-1");
 
-        let result = register(&pool, &registry, Some(json!({
-            "id": "agent-1",
-            "name": "Test Agent"
-        }))).unwrap();
+        let result = register(
+            &pool,
+            &registry,
+            Some(json!({
+                "id": "agent-1",
+                "name": "Test Agent"
+            })),
+        )
+        .unwrap();
         assert_eq!(result["ok"], true);
         assert_eq!(result["agent_id"], "agent-1");
 
@@ -154,12 +170,17 @@ mod tests {
         let pool = open_test_db();
         let (registry, _rx) = setup_registry_with_agent("agent-1");
 
-        register(&pool, &registry, Some(json!({
-            "id": "agent-1",
-            "name": "Agent",
-            "tags": ["rust", "backend"],
-            "capacity_max": 3
-        }))).unwrap();
+        register(
+            &pool,
+            &registry,
+            Some(json!({
+                "id": "agent-1",
+                "name": "Agent",
+                "tags": ["rust", "backend"],
+                "capacity_max": 3
+            })),
+        )
+        .unwrap();
 
         // Verify registry was updated
         let agents = registry.lock().unwrap();
@@ -212,7 +233,12 @@ mod tests {
         assert_eq!(tasks.len(), 1);
 
         // Register resets orphaned tasks
-        register(&pool, &registry, Some(json!({"id": "agent-1", "name": "Agent"}))).unwrap();
+        register(
+            &pool,
+            &registry,
+            Some(json!({"id": "agent-1", "name": "Agent"})),
+        )
+        .unwrap();
 
         // Task should be back to pending (or re-dispatched — but we verify not in-progress for this agent)
         let tasks = crate::tasks::list_tasks(&pool, Some("pending"), None, None).unwrap();
@@ -224,7 +250,12 @@ mod tests {
         let pool = open_test_db();
         let (registry, _rx) = setup_registry_with_agent("agent-1");
 
-        register(&pool, &registry, Some(json!({"id": "agent-1", "name": "Agent"}))).unwrap();
+        register(
+            &pool,
+            &registry,
+            Some(json!({"id": "agent-1", "name": "Agent"})),
+        )
+        .unwrap();
 
         let agents = registry.lock().unwrap();
         assert_eq!(agents["agent-1"].capacity_max, 1);
@@ -237,7 +268,13 @@ mod tests {
         let (registry, _rx) = setup_registry_with_agent("agent-1");
         let pool = open_test_db();
 
-        let result = status(&registry, &pool, "agent-1", Some(json!({"active_tasks": 2}))).unwrap();
+        let result = status(
+            &registry,
+            &pool,
+            "agent-1",
+            Some(json!({"active_tasks": 2})),
+        )
+        .unwrap();
         assert_eq!(result["ok"], true);
 
         let agents = registry.lock().unwrap();
