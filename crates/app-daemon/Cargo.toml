@@ -26,5 +26,6 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 [dev-dependencies]
+http-body-util = "0.1"
 tokio-test = "0.4.5"
 tempfile = "3"

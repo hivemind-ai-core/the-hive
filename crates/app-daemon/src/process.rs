@@ -387,4 +387,62 @@ mod tests {
         let mgr = handle.lock().await;
         assert!(mgr.is_empty());
     }
+
+    #[test]
+    fn output_buffer_tail_with_limit() {
+        let mut buf = OutputBuffer::new(20);
+        for i in 0..10 {
+            buf.push(format!("line {i}"));
+        }
+        let last5 = buf.tail(Some(5));
+        assert_eq!(last5, vec!["line 5", "line 6", "line 7", "line 8", "line 9"]);
+    }
+
+    #[tokio::test]
+    async fn start_stop_exits() {
+        let handle = new_handle();
+        let info = start(&handle, "test", "sleep 999").await.unwrap();
+        assert!(info.pid > 0);
+
+        // Verify it's running.
+        let st = status(&handle, "test").await;
+        assert!(st.running);
+
+        // Stop it.
+        stop(&handle, "test").await.unwrap();
+
+        // After stop, the slot should be removed.
+        let st = status(&handle, "test").await;
+        assert!(!st.running);
+        assert!(st.pid.is_none());
+    }
+
+    #[tokio::test]
+    async fn kill_process_completes() {
+        let handle = new_handle();
+        start(&handle, "test", "sleep 999").await.unwrap();
+
+        let st = status(&handle, "test").await;
+        assert!(st.running);
+
+        // Remove from manager and kill directly.
+        let proc = {
+            let mut mgr = handle.lock().await;
+            mgr.remove("test").unwrap()
+        };
+
+        // The child_handle should still be alive.
+        assert!(!proc.child_handle.is_finished());
+
+        // Kill via stop (re-insert first).
+        {
+            let mut mgr = handle.lock().await;
+            mgr.insert("test".to_string(), proc);
+        }
+        stop(&handle, "test").await.unwrap();
+
+        // Slot is gone.
+        let mgr = handle.lock().await;
+        assert!(!mgr.contains_key("test"));
+    }
 }
