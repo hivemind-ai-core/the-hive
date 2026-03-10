@@ -5,6 +5,7 @@
 
 mod dev;
 mod exec;
+mod process;
 
 use axum::{
     routing::{get, post},
@@ -17,6 +18,14 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use exec::ExecConfig;
+use process::ProcessManagerHandle;
+
+/// Shared application state for all handlers.
+#[derive(Clone)]
+pub struct AppState {
+    pub exec_config: ExecConfig,
+    pub processes: ProcessManagerHandle,
+}
 
 /// Minimal wrapper to deserialize only the `[exec]` table from config.toml.
 #[derive(Debug, Deserialize, Default)]
@@ -60,6 +69,10 @@ async fn main() -> anyhow::Result<()> {
     info!("  Port: {}", port);
 
     let exec_config = load_exec_config();
+    let state = AppState {
+        exec_config,
+        processes: process::new_handle(),
+    };
 
     let app = Router::new()
         .route("/health", get(health))
@@ -67,10 +80,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/dev/start", post(dev::start))
         .route("/dev/stop", post(dev::stop))
         .route("/dev/restart", post(dev::restart))
+        .route("/dev/status", get(dev::status))
+        .route("/dev/logs", get(dev::logs))
+        .route("/dev/stdin", post(dev::stdin))
         .route("/obs/test", post(dev::test))
         .route("/obs/check", post(dev::check))
-        .route("/obs/logs", post(dev::logs))
-        .with_state(exec_config);
+        .with_state(state.clone());
 
     let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
 
@@ -79,6 +94,9 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    // Clean up tracked processes on shutdown.
+    process::kill_all(&state.processes).await;
 
     Ok(())
 }

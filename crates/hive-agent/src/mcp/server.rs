@@ -133,6 +133,16 @@ struct AppExecParams {
     pattern: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct AppDevParams {
+    /// Action to perform: start, stop, restart, status, logs, or stdin
+    action: String,
+    /// For "logs" action: number of tail lines to return
+    tail: Option<u64>,
+    /// For "stdin" action: text to send to the process
+    input: Option<String>,
+}
+
 // ── MCP server handler ────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -430,6 +440,23 @@ impl HiveMcpServer {
             "pattern": p.pattern,
         });
         super::tools::app_exec::exec(&self.state, Some(params))
+            .await
+            .map(|v| v.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Manage the dev server lifecycle (start, stop, restart, status, logs, stdin).
+    #[tool(
+        name = "app.dev",
+        description = "Dev server lifecycle: start, stop, restart, status, logs, stdin. Use action='start' to launch, 'logs' to read output, 'stdin' to send input."
+    )]
+    async fn app_dev(&self, Parameters(p): Parameters<AppDevParams>) -> Result<String, String> {
+        let params = serde_json::json!({
+            "action": p.action,
+            "tail": p.tail,
+            "input": p.input,
+        });
+        super::tools::app_dev::dev(&self.state, Some(params))
             .await
             .map(|v| v.to_string())
             .map_err(|e| e.to_string())

@@ -95,6 +95,7 @@ dependencies = [
  "anyhow",
  "axum",
  "hive-core",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

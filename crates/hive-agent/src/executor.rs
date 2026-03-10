@@ -42,7 +42,8 @@ You have access to the following MCP tools via the `hive` server:
 - **topic.wait** — block until a topic receives new comments (useful for Q&A coordination)
 
 ## Project Execution
-- **app.exec** — run project commands: `build`, `test`, `run <cmd>`, `dev`
+- **app.exec** — run project commands: `build`, `test`, `run <cmd>` (synchronous, waits for completion)
+- **app.dev** — dev server lifecycle: `start`, `stop`, `restart`, `status`, `logs`, `stdin`
 
 When splitting a task, the subtasks are assigned in order — complete each before the next is dispatched. \
 Use `topic.create` + `topic.wait` for synchronous cross-agent coordination. \

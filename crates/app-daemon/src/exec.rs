@@ -257,10 +257,11 @@ mod tests {
 }
 
 pub async fn exec(
-    State(config): State<ExecConfig>,
+    State(state): State<crate::AppState>,
     Json(req): Json<ExecRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let resolved = resolve_command(&req.command, &config).map_err(|msg| {
+    let config = &state.exec_config;
+    let resolved = resolve_command(&req.command, config).map_err(|msg| {
         (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": msg })),
